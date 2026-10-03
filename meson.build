@@ -39,6 +39,7 @@ marker_sources = [
   'src/marker-prefs.c',
   'src/marker-source-view.c',
   'src/marker-preview.c',
+  'src/marker-gnuplot.c',
   'src/marker-string.c',
   'src/marker-widget.c',
   'src/marker-sketcher-window.c',
@@ -78,16 +79,22 @@ hoedown_sources = [
   'src/scidown/src/charter/src/svg_utils.c'
 ]
 
+glib_dep = dependency('glib-2.0')
+gio_dep = dependency('gio-2.0')
+webkit_dep = dependency('webkit2gtk-4.1', version : '>=2.40')
+
 deps = [
   dependency('gtk+-3.0', version : '>=3.20'),
-  dependency('glib-2.0'),
+  glib_dep,
+  gio_dep,
   dependency('gtksourceview-4'),
-  dependency('webkit2gtk-4.1'),
+  webkit_dep,
+  dependency('libsoup-3.0'),
   dependency('gtkspell3-3.0')
 ]
 
 ext_deps =[
-  dependency('webkit2gtk-4.1')
+  webkit_dep
 ]
 
 add_global_arguments(
@@ -118,6 +125,15 @@ executable(
   link_args: '-lm',
   install : true
 )
+
+gnuplot_test = executable(
+  'marker-gnuplot-test',
+  sources : ['test/marker-gnuplot-test.c', 'src/marker-gnuplot.c'],
+  include_directories : include_directories('src'),
+  dependencies : [glib_dep, gio_dep]
+)
+
+test('gnuplot data file boundary', gnuplot_test)
 
 install_data(
   'data/com.github.fabiocolacio.marker.svg',

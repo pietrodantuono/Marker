@@ -20,6 +20,7 @@ Marker is a markdown editor for linux made with GTK+-3.0
 * TeX math rendering with [KaTeX](https://khan.github.io/KaTeX/) or [MathJax](mathjax.org/)
 * Support for [mermaid](https://mermaidjs.github.io/) diagrams
 * Support for [charter](https://github.com/Mandarancio/charter/) for plotting
+* Sandboxed [gnuplot](https://www.gnuplot.info/) previews in fenced code blocks, including relative CSV, DAT, and TXT data files
 * Syntax highlighting for code blocks with [highlight.js](https://highlightjs.org/)
 * Integrated sketch editor
 * Flexible export options with [pandoc](https://pandoc.org/)

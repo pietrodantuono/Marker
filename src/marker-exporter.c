@@ -67,6 +67,72 @@ marker_exporter_str_to_fmt(const char* str)
   return HTML;
 }
 
+static gboolean
+export_html (const gchar  *markdown,
+             gsize         length,
+             gchar        *base_folder,
+             const gchar  *document_path,
+             const gchar  *stylesheet,
+             const gchar  *outfile,
+             GError      **error)
+{
+  g_autofree gchar *final_html =
+    marker_markdown_to_html_with_css_inline (
+      markdown,
+      length,
+      base_folder,
+      marker_prefs_get_use_mathjs () ? MATHJS_NET : MATHJS_OFF,
+      marker_prefs_get_use_highlight () ? HIGHLIGHT_NET : HIGHLIGHT_OFF,
+      marker_prefs_get_use_mermaid () ? MERMAID_NET : MERMAID_OFF,
+      stylesheet,
+      -1);
+
+  if (final_html == NULL) {
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                         "Unable to render the Markdown document.");
+    return FALSE;
+  }
+  if (strstr (final_html, "class=\"language-gnuplot\"") == NULL)
+    return g_file_set_contents (outfile, final_html, -1, error);
+
+  g_autofree gchar *staging_html =
+    marker_markdown_to_html_with_css_inline (markdown,
+                                             length,
+                                             base_folder,
+                                             MATHJS_OFF,
+                                             HIGHLIGHT_OFF,
+                                             MERMAID_OFF,
+                                             stylesheet,
+                                             -1);
+  if (staging_html == NULL) {
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                         "Unable to prepare the gnuplot export.");
+    return FALSE;
+  }
+
+  return marker_preview_export_html (staging_html,
+                                     final_html,
+                                     document_path,
+                                     outfile,
+                                     error);
+}
+
+static void
+show_export_error (MarkerWindow *window,
+                   const GError *error)
+{
+  GtkWidget *dialog = gtk_message_dialog_new (GTK_WINDOW (window),
+                                               GTK_DIALOG_MODAL,
+                                               GTK_MESSAGE_ERROR,
+                                               GTK_BUTTONS_CLOSE,
+                                               "%s",
+                                               _("Export failed"));
+  gtk_message_dialog_format_secondary_text (GTK_MESSAGE_DIALOG (dialog),
+                                             "%s", error->message);
+  gtk_dialog_run (GTK_DIALOG (dialog));
+  gtk_widget_destroy (dialog);
+}
+
 void
 marker_exporter_export_pandoc(const char*        markdown,
                               const char*        stylesheet_path,
@@ -176,43 +242,51 @@ marker_exporter_show_export_dialog(MarkerWindow* window)
     markdown = marker_source_view_get_text (source_view, false);
 
     GFile * source = marker_editor_get_file(editor);
-    char * base_folder = NULL;
+    g_autofree gchar *base_folder = NULL;
+    g_autofree gchar *source_path = NULL;
 
-    if (source)
-      base_folder = g_file_get_path(g_file_get_parent(source));
+    if (source) {
+      g_autoptr (GFile) parent = g_file_get_parent (source);
+      base_folder = g_file_get_path (parent);
+      source_path = g_file_get_path (source);
+    }
     size_t len = strlen(markdown);
     metadata * meta = marker_markdown_metadata(markdown, len);
+    if (!meta) {
+      fprintf(stderr, "marker-exporter.c#show_export_dialog: Document Metadata NULL!\n");
+      gtk_widget_destroy (GTK_WIDGET (dialog));
+      return;
+    }
     enum scidown_paper_size paper_size = meta->paper_size;
     if (meta->doc_class == CLASS_BEAMER && !(paper_size == B43 || paper_size == B169))
       paper_size = B43;
-
-    if (!meta) {
-      fprintf(stderr, "marker-exporter.c#show_export_dialog: Document Metadata NULL!\n");
-      return;
-    }
     GtkPageOrientation orientation = meta->doc_class == CLASS_BEAMER ? GTK_PAGE_ORIENTATION_LANDSCAPE : GTK_PAGE_ORIENTATION_PORTRAIT;
     switch (fmt)
     {
       case HTML:
-        marker_markdown_to_html_file_with_css_inline(markdown,
-                                                     len,
-                                                     base_folder,
-                                                     (marker_prefs_get_use_mathjs())
-                                                       ? MATHJS_NET
-                                                       : MATHJS_OFF,
-                                                     (marker_prefs_get_use_highlight())
-                                                       ? HIGHLIGHT_NET
-                                                       : HIGHLIGHT_OFF,
-                                                     (marker_prefs_get_use_mermaid()
-                                                       ? MERMAID_NET
-                                                       : MERMAID_OFF),
-                                                     stylesheet_path,
-                                                     filename);
+      {
+        g_autoptr (GError) error = NULL;
+        if (!export_html (markdown,
+                          len,
+                          base_folder,
+                          source_path,
+                          stylesheet_path,
+                          filename,
+                          &error))
+          show_export_error (window, error);
         break;
+      }
 
       case PDF:
-        marker_preview_print_pdf(preview, filename, paper_size, orientation);
+      {
+        if (!marker_preview_print_pdf (preview, filename, paper_size, orientation)) {
+          g_autoptr (GError) error =
+            g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED,
+                                 "Unable to create the PDF document.");
+          show_export_error (window, error);
+        }
         break;
+      }
 
       case LATEX:
         marker_markdown_to_latex_file(markdown,
@@ -257,18 +331,28 @@ marker_exporter_show_export_dialog(MarkerWindow* window)
   gtk_widget_destroy(GTK_WIDGET(dialog));
 }
 
-void
+gboolean
 marker_exporter_export (const gchar *infile,
                         const gchar *outfile)
 {
-  g_return_if_fail (infile != NULL && outfile != NULL);
+  g_return_val_if_fail (infile != NULL && outfile != NULL, FALSE);
 
   long len = 0;
   g_autofree gchar *markdown = marker_utils_read_file (infile, &len);
   g_autofree gchar *stylesheet = marker_prefs_get_css_theme ();
   g_autofree gchar *base_folder = marker_string_filename_get_path (infile);
+  g_autoptr (GError) error = NULL;
+
+  if (markdown == NULL) {
+    g_printerr ("Unable to read Markdown input.\n");
+    return FALSE;
+  }
 
   metadata *meta = marker_markdown_metadata(markdown, len);
+  if (meta == NULL) {
+    g_printerr ("Unable to read Markdown metadata.\n");
+    return FALSE;
+  }
   enum scidown_paper_size paper_size = meta->paper_size; 
   if (meta->doc_class == CLASS_BEAMER && !(paper_size == B43 || paper_size == B169))
     paper_size = B43;
@@ -277,24 +361,22 @@ marker_exporter_export (const gchar *infile,
     GTK_PAGE_ORIENTATION_PORTRAIT;
 
   if (marker_string_ends_with (outfile, ".html")) {
-    marker_markdown_to_html_file_with_css_inline(markdown, len, base_folder,
-                                                 (marker_prefs_get_use_mathjs())
-                                                   ? MATHJS_NET
-                                                   : MATHJS_OFF,
-                                                 (marker_prefs_get_use_highlight())
-                                                   ? HIGHLIGHT_NET
-                                                   : HIGHLIGHT_OFF,
-                                                 (marker_prefs_get_use_mermaid()
-                                                   ? MERMAID_NET
-                                                   : MERMAID_OFF),
-                                                 stylesheet, outfile);  
+    if (!export_html (markdown,
+                      len,
+                      base_folder,
+                      infile,
+                      stylesheet,
+                      outfile,
+                      &error)) {
+      g_printerr ("HTML export failed: %s\n", error->message);
+      return FALSE;
+    }
   }
   else if (marker_string_ends_with (outfile, ".pdf")) {
-    /*
-    g_autoptr (MarkerPreview) preview = marker_preview_new ();
-    marker_preview_render_markdown (preview, markdown, stylesheet, base_folder);
-    marker_preview_print_pdf (preview, outfile, paper_size, orientation);
-    */
+    g_autoptr (MarkerPreview) preview = g_object_ref_sink (marker_preview_new ());
+    marker_preview_render_markdown (preview, markdown, stylesheet, infile, -1);
+    if (!marker_preview_print_pdf (preview, outfile, paper_size, orientation))
+      return FALSE;
   }
   else if (marker_string_ends_with (outfile, ".tex")) {
     marker_markdown_to_latex_file(markdown, len, base_folder,
@@ -312,4 +394,5 @@ marker_exporter_export (const gchar *infile,
   else {
     marker_exporter_export_pandoc(markdown, stylesheet, outfile);
   }
+  return TRUE;
 }

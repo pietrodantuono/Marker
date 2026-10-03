@@ -43,11 +43,16 @@ void                 marker_preview_render_markdown              (MarkerPreview 
                                                                   const char         *css_theme,
                                                                   const char         *base_uri,
                                                                   int  		        cursor);
+gboolean             marker_preview_export_html                 (const gchar        *staging_html,
+                                                                  const gchar        *final_html,
+                                                                  const gchar        *document_path,
+                                                                  const gchar        *outfile,
+                                                                  GError            **error);
 
 WebKitPrintOperationResponse                 
                      marker_preview_run_print_dialog             (MarkerPreview      *preview,
                                                                   GtkWindow          *parent);
-void                 marker_preview_print_pdf                    (MarkerPreview*     preview,
+gboolean             marker_preview_print_pdf                    (MarkerPreview*     preview,
                                                                   const char*        outfile,
                                                                   enum scidown_paper_size paper_size,
                                                                   GtkPageOrientation orientation);

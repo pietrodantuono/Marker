@@ -131,6 +131,14 @@ buffer_changed_cb (GtkTextBuffer *buffer,
   emit_signal_title_changed (editor);
 }
 
+static void
+gnuplot_data_changed_cb (MarkerPreview *preview,
+                         gpointer       user_data)
+{
+  MarkerEditor *editor = MARKER_EDITOR (user_data);
+  editor->needs_refresh = TRUE;
+}
+
 static gboolean
 preview_window_closed_cb (GtkWindow *preview_window,
                           GdkEvent  *event,
@@ -295,6 +303,10 @@ marker_editor_init (MarkerEditor *editor)
   gtk_box_pack_start (GTK_BOX (editor), GTK_WIDGET (editor->paned), TRUE, TRUE, 0);
 
   editor->preview = marker_preview_new ();
+  g_signal_connect (editor->preview,
+                    "gnuplot-data-changed",
+                    G_CALLBACK (gnuplot_data_changed_cb),
+                    editor);
   gtk_widget_show (GTK_WIDGET (editor->preview));
 
   editor->source_view = marker_source_view_new ();

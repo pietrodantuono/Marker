@@ -180,3 +180,27 @@ img {
 *:not(span){
   unicode-bidi: plaintext;
 }
+
+.gnuplot-preview {
+  margin: 1em 0;
+  overflow-x: auto;
+}
+
+.gnuplot-preview svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  background: white;
+  color-scheme: light;
+}
+
+.gnuplot-error {
+  margin: 1em 0;
+  padding: .5em 1em;
+  border-left: 3px solid #b58900;
+}
+
+.gnuplot-error pre {
+  margin: 0;
+  white-space: pre-wrap;
+}

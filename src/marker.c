@@ -105,8 +105,9 @@ marker_open(GtkApplication* app,
     g_autoptr (GFile) outfile = g_file_new_for_commandline_arg (outfile_arg);
     g_autofree gchar *outfile_path = g_file_get_path (outfile);
     g_autofree gchar *infile_path = g_file_get_path (files[0]);
-    marker_exporter_export (infile_path, outfile_path);
-    exit (0);
+    exit (marker_exporter_export (infile_path, outfile_path)
+          ? EXIT_SUCCESS
+          : EXIT_FAILURE);
   }
  
   for (int i = 0; i < num_files; ++i)

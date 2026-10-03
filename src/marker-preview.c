@@ -24,8 +24,10 @@
 #include <libintl.h>
 
 #include <glib.h>
+#include <libsoup/soup.h>
 #include <time.h>
 
+#include "marker-gnuplot.h"
 #include "marker-markdown.h"
 #include "marker-prefs.h"
 
@@ -41,15 +43,231 @@
 #define SCROLL_STEP_SCRIPT "window.scrollBy(%d,%d);"
 #define SCROLL_SCRIPT "window.scrollTo(%d,%d);"
 
+#define GNUPLOT_WORLD "marker-gnuplot"
+#define GNUPLOT_DATA_HANDLER "markerGnuplotData"
+#define GNUPLOT_DONE_HANDLER "markerGnuplotDone"
+
 #define min(a, b) ((a < b) ? a : b)
 #define max(a, b) ((a < b) ? b : a)
 
 struct _MarkerPreview
 {
   WebKitWebView parent_instance;
+
+  gchar      *document_dir;
+  gchar      *gnuplot_script;
+  GHashTable *data_monitors;
+  GError     *render_error;
+  guint       data_change_source;
+  gboolean    gnuplot_available;
+  gboolean    gnuplot_pending;
+  gboolean    manual_gnuplot;
 };
 
 G_DEFINE_TYPE(MarkerPreview, marker_preview, WEBKIT_TYPE_WEB_VIEW)
+
+enum {
+  GNUPLOT_DATA_CHANGED,
+  GNUPLOT_RENDER_COMPLETE,
+  LAST_SIGNAL
+};
+
+static guint preview_signals[LAST_SIGNAL];
+
+static void
+gnuplot_scheme_request_cb (WebKitURISchemeRequest *request,
+                           gpointer                user_data)
+{
+  const gchar *path = webkit_uri_scheme_request_get_path (request);
+  const gchar *filename = NULL;
+  const gchar *content_type = NULL;
+  g_autofree gchar *asset_path = NULL;
+  gchar *contents = NULL;
+  gsize length = 0;
+
+  const gchar *method = webkit_uri_scheme_request_get_http_method (request);
+  if (method != NULL && !g_str_equal (method, "GET")) {
+    g_autoptr (GError) error = g_error_new_literal (G_IO_ERROR,
+                                                    G_IO_ERROR_NOT_SUPPORTED,
+                                                    "Unsupported gnuplot asset request.");
+    webkit_uri_scheme_request_finish_error (request, error);
+    return;
+  }
+
+  if (g_strcmp0 (path, "/gnuplot.mjs") == 0) {
+    filename = "gnuplot.mjs";
+    content_type = "text/javascript";
+  } else if (g_strcmp0 (path, "/gnuplot.wasm") == 0) {
+    filename = "gnuplot.wasm";
+    content_type = "application/wasm";
+  } else {
+    g_autoptr (GError) error = g_error_new_literal (G_IO_ERROR,
+                                                    G_IO_ERROR_NOT_FOUND,
+                                                    "Unknown gnuplot asset.");
+    webkit_uri_scheme_request_finish_error (request, error);
+    return;
+  }
+
+  asset_path = g_build_filename (SCRIPTS_DIR, "gnuplot", filename, NULL);
+  if (!g_file_get_contents (asset_path, &contents, &length, NULL)) {
+    g_autoptr (GError) error = g_error_new_literal (G_IO_ERROR,
+                                                    G_IO_ERROR_NOT_FOUND,
+                                                    "The bundled gnuplot runtime is unavailable.");
+    webkit_uri_scheme_request_finish_error (request, error);
+    return;
+  }
+
+  g_autoptr (GInputStream) stream = g_memory_input_stream_new_from_data (contents,
+                                                                         length,
+                                                                         g_free);
+  g_autoptr (WebKitURISchemeResponse) response =
+    webkit_uri_scheme_response_new (stream, length);
+  g_autoptr (SoupMessageHeaders) headers =
+    soup_message_headers_new (SOUP_MESSAGE_HEADERS_RESPONSE);
+  soup_message_headers_append (headers, "Access-Control-Allow-Origin", "*");
+  webkit_uri_scheme_response_set_status (response, 200, "OK");
+  webkit_uri_scheme_response_set_content_type (response, content_type);
+  webkit_uri_scheme_response_set_http_headers (response,
+                                                g_steal_pointer (&headers));
+  webkit_uri_scheme_request_finish_with_response (request, response);
+}
+
+static void
+register_gnuplot_scheme (void)
+{
+  static gsize registered = 0;
+
+  if (g_once_init_enter (&registered)) {
+    WebKitWebContext *context = webkit_web_context_get_default ();
+    WebKitSecurityManager *security = webkit_web_context_get_security_manager (context);
+
+    webkit_web_context_register_uri_scheme (context,
+                                            "marker-gnuplot",
+                                            gnuplot_scheme_request_cb,
+                                            NULL,
+                                            NULL);
+    webkit_security_manager_register_uri_scheme_as_local (security, "marker-gnuplot");
+    webkit_security_manager_register_uri_scheme_as_secure (security, "marker-gnuplot");
+    webkit_security_manager_register_uri_scheme_as_cors_enabled (security,
+                                                                 "marker-gnuplot");
+    g_once_init_leave (&registered, 1);
+  }
+}
+
+static void
+data_monitor_free (gpointer data)
+{
+  GFileMonitor *monitor = data;
+  g_file_monitor_cancel (monitor);
+  g_object_unref (monitor);
+}
+
+static gboolean
+emit_data_changed_cb (gpointer user_data)
+{
+  MarkerPreview *preview = MARKER_PREVIEW (user_data);
+  preview->data_change_source = 0;
+  g_signal_emit (preview, preview_signals[GNUPLOT_DATA_CHANGED], 0);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+data_file_changed_cb (GFileMonitor      *monitor,
+                      GFile             *file,
+                      GFile             *other_file,
+                      GFileMonitorEvent  event,
+                      gpointer           user_data)
+{
+  MarkerPreview *preview = MARKER_PREVIEW (user_data);
+
+  if (preview->data_change_source == 0)
+    preview->data_change_source = g_timeout_add (50, emit_data_changed_cb, preview);
+}
+
+static void
+monitor_data_file (MarkerPreview *preview,
+                   GFile         *file)
+{
+  g_autofree gchar *path = g_file_get_path (file);
+  g_autoptr (GError) error = NULL;
+  GFileMonitor *monitor;
+
+  if (path == NULL || g_hash_table_contains (preview->data_monitors, path))
+    return;
+
+  monitor = g_file_monitor_file (file, G_FILE_MONITOR_NONE, NULL, &error);
+  if (monitor == NULL)
+    return;
+
+  g_signal_connect_object (monitor,
+                           "changed",
+                           G_CALLBACK (data_file_changed_cb),
+                           preview,
+                           0);
+  g_hash_table_insert (preview->data_monitors, g_steal_pointer (&path), monitor);
+}
+
+static void
+finish_gnuplot_render (MarkerPreview *preview)
+{
+  if (!preview->gnuplot_pending)
+    return;
+
+  preview->gnuplot_pending = FALSE;
+  g_signal_emit (preview, preview_signals[GNUPLOT_RENDER_COMPLETE], 0);
+}
+
+static gboolean
+gnuplot_data_message_cb (WebKitUserContentManager *manager,
+                         JSCValue                 *value,
+                         WebKitScriptMessageReply *reply,
+                         gpointer                  user_data)
+{
+  MarkerPreview *preview = MARKER_PREVIEW (user_data);
+  g_autofree gchar *operand = NULL;
+  g_autofree gchar *encoded = NULL;
+  g_autoptr (GBytes) bytes = NULL;
+  g_autoptr (GFile) file = NULL;
+  g_autoptr (GError) error = NULL;
+
+  if (!jsc_value_is_string (value)) {
+    webkit_script_message_reply_return_error_message (reply, "Invalid plot data path.");
+    return TRUE;
+  }
+
+  operand = jsc_value_to_string (value);
+  bytes = marker_gnuplot_load_data (preview->document_dir, operand, &file, &error);
+  if (file != NULL)
+    monitor_data_file (preview, file);
+  if (bytes == NULL) {
+    webkit_script_message_reply_return_error_message (reply, error->message);
+    return TRUE;
+  }
+
+  gsize length;
+  const guchar *contents = g_bytes_get_data (bytes, &length);
+  encoded = g_base64_encode (contents, length);
+  g_autoptr (JSCValue) response =
+    jsc_value_new_string (jsc_value_get_context (value), encoded);
+  webkit_script_message_reply_return_value (reply, response);
+  return TRUE;
+}
+
+static gboolean
+gnuplot_done_message_cb (WebKitUserContentManager *manager,
+                         JSCValue                 *value,
+                         WebKitScriptMessageReply *reply,
+                         gpointer                  user_data)
+{
+  MarkerPreview *preview = MARKER_PREVIEW (user_data);
+
+  finish_gnuplot_render (preview);
+
+  g_autoptr (JSCValue) response =
+    jsc_value_new_boolean (jsc_value_get_context (value), TRUE);
+  webkit_script_message_reply_return_value (reply, response);
+  return TRUE;
+}
 
 static gboolean
 open_uri (WebKitPolicyDecision *decision) {
@@ -113,6 +331,62 @@ context_menu_cb  (WebKitWebView       *web_view,
                   gpointer             user_data)
 {
   return TRUE;
+}
+
+static void
+set_render_error (MarkerPreview *preview,
+                  const GError  *error)
+{
+  g_clear_error (&preview->render_error);
+  preview->render_error = error != NULL
+    ? g_error_copy (error)
+    : g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED,
+                           "Gnuplot rendering failed.");
+  finish_gnuplot_render (preview);
+}
+
+static void
+manual_gnuplot_finished_cb (GObject      *object,
+                            GAsyncResult *result,
+                            gpointer      user_data)
+{
+  MarkerPreview *preview = MARKER_PREVIEW (object);
+  g_autoptr (GError) error = NULL;
+  g_autoptr (JSCValue) value =
+    webkit_web_view_evaluate_javascript_finish (WEBKIT_WEB_VIEW (object),
+                                                result,
+                                                &error);
+  if (value == NULL)
+    set_render_error (preview, error);
+}
+
+static gboolean
+load_failed_cb (WebKitWebView  *web_view,
+                WebKitLoadEvent event,
+                const gchar    *failing_uri,
+                GError         *error,
+                gpointer        user_data)
+{
+  MarkerPreview *preview = MARKER_PREVIEW (web_view);
+  if (preview->gnuplot_pending)
+    set_render_error (preview, error);
+  return FALSE;
+}
+
+static void
+web_process_terminated_cb (WebKitWebView                    *web_view,
+                           WebKitWebProcessTerminationReason reason,
+                           gpointer                          user_data)
+{
+  MarkerPreview *preview = MARKER_PREVIEW (web_view);
+
+  if (preview->gnuplot_pending) {
+    g_autoptr (GError) error =
+      g_error_new_literal (G_IO_ERROR,
+                           G_IO_ERROR_FAILED,
+                           "The preview web process stopped.");
+    set_render_error (preview, error);
+  }
 }
 
 static void
@@ -216,9 +490,11 @@ scroll_event_cb (GtkWidget *widget,
 }
 
 static void
-load_changed_cb (WebKitWebView   *preview,
+load_changed_cb (WebKitWebView   *web_view,
                  WebKitLoadEvent  event)
 {
+  MarkerPreview *preview = MARKER_PREVIEW (web_view);
+
   switch (event)
   {
     case WEBKIT_LOAD_STARTED:
@@ -231,6 +507,27 @@ load_changed_cb (WebKitWebView   *preview,
       break;
 
     case WEBKIT_LOAD_FINISHED:
+      if (preview->manual_gnuplot) {
+        preview->manual_gnuplot = FALSE;
+        webkit_settings_set_enable_javascript (
+          webkit_web_view_get_settings (web_view), TRUE);
+        if (preview->gnuplot_script != NULL) {
+          webkit_web_view_evaluate_javascript (web_view,
+                                               preview->gnuplot_script,
+                                               -1,
+                                               GNUPLOT_WORLD,
+                                               NULL,
+                                               NULL,
+                                               manual_gnuplot_finished_cb,
+                                               NULL);
+        } else {
+          g_autoptr (GError) error =
+            g_error_new_literal (G_IO_ERROR,
+                                 G_IO_ERROR_NOT_FOUND,
+                                 "The bundled gnuplot preview adapter is unavailable.");
+          set_render_error (preview, error);
+        }
+      }
       break;
   }
 }
@@ -241,6 +538,31 @@ pdf_print_failed_cb (WebKitPrintOperation* print_op,
                      gpointer              user_data)
 {
   g_printerr("print failed with error: %s\n", err->message);
+}
+
+typedef struct {
+  GMainLoop *loop;
+  gboolean   complete;
+  gboolean   failed;
+} PrintWait;
+
+static void
+pdf_print_finished_cb (WebKitPrintOperation *print_op,
+                       gpointer              user_data)
+{
+  PrintWait *wait = user_data;
+  wait->complete = TRUE;
+  g_main_loop_quit (wait->loop);
+}
+
+static void
+pdf_print_wait_failed_cb (WebKitPrintOperation *print_op,
+                          GError               *error,
+                          gpointer              user_data)
+{
+  PrintWait *wait = user_data;
+  pdf_print_failed_cb (print_op, error, NULL);
+  wait->failed = TRUE;
 }
 
 static void
@@ -273,23 +595,84 @@ marker_preview_set_zoom_level (MarkerPreview *preview,
 static void
 marker_preview_init (MarkerPreview *preview)
 {
-  g_signal_connect (webkit_web_context_get_default (),
-                    "initialize-web-extensions",
-                    G_CALLBACK (initialize_web_extensions_cb),
-                    NULL);
+  static gsize web_extensions_connected = 0;
 
+  if (g_once_init_enter (&web_extensions_connected)) {
+    g_signal_connect (webkit_web_context_get_default (),
+                      "initialize-web-extensions",
+                      G_CALLBACK (initialize_web_extensions_cb),
+                      NULL);
+    g_once_init_leave (&web_extensions_connected, 1);
+  }
+
+  preview->data_monitors = g_hash_table_new_full (g_str_hash,
+                                                   g_str_equal,
+                                                   g_free,
+                                                   data_monitor_free);
   g_signal_connect (preview, "scroll-event", G_CALLBACK (scroll_event_cb), NULL);
   g_signal_connect (preview, "key-press-event", G_CALLBACK (key_press_event_cb), NULL);
+  g_signal_connect (preview, "decide-policy", G_CALLBACK (decide_policy_cb), NULL);
+  g_signal_connect (preview, "context-menu", G_CALLBACK (context_menu_cb), NULL);
+  g_signal_connect (preview, "load-failed", G_CALLBACK (load_failed_cb), NULL);
+  g_signal_connect (preview,
+                    "web-process-terminated",
+                    G_CALLBACK (web_process_terminated_cb),
+                    NULL);
+}
+
+static void
+marker_preview_dispose (GObject *object)
+{
+  MarkerPreview *preview = MARKER_PREVIEW (object);
+
+  if (preview->data_change_source != 0) {
+    g_source_remove (preview->data_change_source);
+    preview->data_change_source = 0;
+  }
+  g_hash_table_remove_all (preview->data_monitors);
+
+  G_OBJECT_CLASS (marker_preview_parent_class)->dispose (object);
+}
+
+static void
+marker_preview_finalize (GObject *object)
+{
+  MarkerPreview *preview = MARKER_PREVIEW (object);
+
+  g_clear_pointer (&preview->document_dir, g_free);
+  g_clear_pointer (&preview->gnuplot_script, g_free);
+  g_clear_pointer (&preview->data_monitors, g_hash_table_unref);
+  g_clear_error (&preview->render_error);
+
+  G_OBJECT_CLASS (marker_preview_parent_class)->finalize (object);
 }
 
 static void
 marker_preview_class_init (MarkerPreviewClass *class)
 {
+  GObjectClass *object_class = G_OBJECT_CLASS (class);
+
+  object_class->dispose = marker_preview_dispose;
+  object_class->finalize = marker_preview_finalize;
+
   g_signal_newv ("zoom-changed",
                  G_TYPE_FROM_CLASS (class),
                  G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE,
                  NULL, NULL, NULL, NULL,
                  G_TYPE_NONE, 0, NULL);
+
+  preview_signals[GNUPLOT_DATA_CHANGED] =
+    g_signal_new ("gnuplot-data-changed",
+                  G_TYPE_FROM_CLASS (class),
+                  G_SIGNAL_RUN_LAST,
+                  0, NULL, NULL, NULL,
+                  G_TYPE_NONE, 0);
+  preview_signals[GNUPLOT_RENDER_COMPLETE] =
+    g_signal_new ("gnuplot-render-complete",
+                  G_TYPE_FROM_CLASS (class),
+                  G_SIGNAL_RUN_LAST,
+                  0, NULL, NULL, NULL,
+                  G_TYPE_NONE, 0);
 
 
   WEBKIT_WEB_VIEW_CLASS(class)->load_changed = load_changed_cb;
@@ -298,7 +681,47 @@ marker_preview_class_init (MarkerPreviewClass *class)
 MarkerPreview*
 marker_preview_new(void)
 {
-  MarkerPreview * obj =  g_object_new(MARKER_TYPE_PREVIEW, NULL);
+  g_autoptr (WebKitUserContentManager) manager = NULL;
+  g_autofree gchar *script_path = NULL;
+  MarkerPreview *obj;
+
+  register_gnuplot_scheme ();
+  manager = webkit_user_content_manager_new ();
+  obj = g_object_new (MARKER_TYPE_PREVIEW,
+                      "user-content-manager", manager,
+                      NULL);
+
+  script_path = g_build_filename (SCRIPTS_DIR,
+                                  "gnuplot",
+                                  "gnuplot-preview.js",
+                                  NULL);
+  if (g_file_get_contents (script_path, &obj->gnuplot_script, NULL, NULL)) {
+    g_autoptr (WebKitUserScript) script =
+      webkit_user_script_new_for_world (obj->gnuplot_script,
+                                        WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
+                                        WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END,
+                                        GNUPLOT_WORLD,
+                                        NULL,
+                                        NULL);
+    webkit_user_content_manager_add_script (manager, script);
+    obj->gnuplot_available =
+      webkit_user_content_manager_register_script_message_handler_with_reply (
+        manager, GNUPLOT_DATA_HANDLER, GNUPLOT_WORLD) &&
+      webkit_user_content_manager_register_script_message_handler_with_reply (
+        manager, GNUPLOT_DONE_HANDLER, GNUPLOT_WORLD);
+  }
+
+  g_signal_connect_object (manager,
+                           "script-message-with-reply-received::" GNUPLOT_DATA_HANDLER,
+                           G_CALLBACK (gnuplot_data_message_cb),
+                           obj,
+                           0);
+  g_signal_connect_object (manager,
+                           "script-message-with-reply-received::" GNUPLOT_DONE_HANDLER,
+                           G_CALLBACK (gnuplot_done_message_cb),
+                           obj,
+                           0);
+
   webkit_web_view_set_zoom_level (WEBKIT_WEB_VIEW (obj), makrer_prefs_get_zoom_level ());
   
 
@@ -355,6 +778,39 @@ marker_preview_zoom_in (MarkerPreview *preview)
   g_signal_emit_by_name (preview, "zoom-changed");
 }
 
+static void
+marker_preview_load_html (MarkerPreview *preview,
+                          const gchar   *html,
+                          const gchar   *document_path,
+                          gboolean       manual_gnuplot)
+{
+  g_autofree gchar *uri = NULL;
+
+  if (preview->data_change_source != 0) {
+    g_source_remove (preview->data_change_source);
+    preview->data_change_source = 0;
+  }
+  g_hash_table_remove_all (preview->data_monitors);
+  g_clear_pointer (&preview->document_dir, g_free);
+  g_clear_error (&preview->render_error);
+  preview->document_dir = document_path != NULL
+    ? g_path_get_dirname (document_path)
+    : NULL;
+  preview->gnuplot_pending = preview->gnuplot_available;
+  preview->manual_gnuplot = manual_gnuplot && preview->gnuplot_available;
+
+  webkit_settings_set_enable_javascript (
+    webkit_web_view_get_settings (WEBKIT_WEB_VIEW (preview)),
+    !preview->manual_gnuplot);
+
+  if (document_path != NULL)
+    uri = g_filename_to_uri (document_path, NULL, NULL);
+  if (uri == NULL)
+    uri = g_filename_to_uri (g_get_home_dir (), NULL, NULL);
+
+  webkit_web_view_load_html (WEBKIT_WEB_VIEW (preview), html, uri);
+}
+
 void
 marker_preview_render_markdown(MarkerPreview* preview,
                                const char*    markdown,
@@ -376,7 +832,7 @@ marker_preview_render_markdown(MarkerPreview* preview,
     mermaid_mode = MERMAID_LOCAL;
   }
 
-  char * base_folder = NULL;
+  g_autofree char *base_folder = NULL;
   if (base_uri)
     base_folder = marker_string_filename_get_path(base_uri);
   char* html = marker_markdown_to_html(markdown,
@@ -388,101 +844,241 @@ marker_preview_render_markdown(MarkerPreview* preview,
                                        css_theme,
                                        cursor);
 
-  WebKitWebView* web_view = WEBKIT_WEB_VIEW(preview);
-
-  g_signal_connect(web_view,
-                   "decide-policy",
-                   G_CALLBACK(decide_policy_cb),
-                   NULL);
-  g_signal_connect(web_view,
-                   "context-menu",
-                   G_CALLBACK(context_menu_cb),
-                   NULL);
-
-  gchar * uri;
-  if (base_uri) {
-    uri = g_filename_to_uri  (g_locale_from_utf8(base_uri, strlen(base_uri), NULL, NULL, NULL), NULL, NULL);
-  }else {
-    uri = g_strdup_printf ("file://%s", getenv("HOME"));
-  }
-  webkit_web_view_load_html(web_view 
-                            ,html
-                            ,uri);
-
-  g_free(uri);
+  marker_preview_load_html (preview, html, base_uri, FALSE);
   free(html);
+}
+
+static void
+render_complete_quit_cb (MarkerPreview *preview,
+                         gpointer       user_data)
+{
+  g_main_loop_quit (user_data);
+}
+
+static gboolean
+marker_preview_wait_for_gnuplot (MarkerPreview *preview,
+                                 GError       **error)
+{
+  if (preview->gnuplot_pending) {
+    g_autoptr (GMainLoop) loop = g_main_loop_new (NULL, FALSE);
+    gulong handler = g_signal_connect (preview,
+                                       "gnuplot-render-complete",
+                                       G_CALLBACK (render_complete_quit_cb),
+                                       loop);
+    if (preview->gnuplot_pending)
+      g_main_loop_run (loop);
+    g_signal_handler_disconnect (preview, handler);
+  }
+
+  if (preview->render_error != NULL) {
+    g_propagate_error (error, g_error_copy (preview->render_error));
+    return FALSE;
+  }
+  return TRUE;
+}
+
+typedef struct {
+  GMainLoop *loop;
+  JSCValue  *value;
+  GError    *error;
+  gboolean   complete;
+} JavascriptWait;
+
+static void
+export_javascript_finished_cb (GObject      *object,
+                               GAsyncResult *result,
+                               gpointer      user_data)
+{
+  JavascriptWait *wait = user_data;
+  wait->value = webkit_web_view_evaluate_javascript_finish (WEBKIT_WEB_VIEW (object),
+                                                            result,
+                                                            &wait->error);
+  wait->complete = TRUE;
+  g_main_loop_quit (wait->loop);
+}
+
+gboolean
+marker_preview_export_html (const gchar  *staging_html,
+                            const gchar  *final_html,
+                            const gchar  *document_path,
+                            const gchar  *outfile,
+                            GError      **error)
+{
+  g_autoptr (MarkerPreview) preview = NULL;
+  g_autoptr (GMainLoop) loop = NULL;
+  g_autofree gchar *encoded = NULL;
+  g_autofree gchar *script = NULL;
+  g_autofree gchar *rendered = NULL;
+  JavascriptWait wait = {0};
+
+  g_return_val_if_fail (staging_html != NULL, FALSE);
+  g_return_val_if_fail (final_html != NULL, FALSE);
+  g_return_val_if_fail (outfile != NULL, FALSE);
+
+  preview = g_object_ref_sink (marker_preview_new ());
+  if (!preview->gnuplot_available) {
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+                         "The bundled gnuplot preview adapter is unavailable.");
+    return FALSE;
+  }
+
+  marker_preview_load_html (preview, staging_html, document_path, TRUE);
+  if (!marker_preview_wait_for_gnuplot (preview, error))
+    return FALSE;
+
+  encoded = g_base64_encode ((const guchar *) final_html, strlen (final_html));
+  script = g_strdup_printf ("globalThis.markerGnuplotExport(\"%s\")", encoded);
+  loop = g_main_loop_new (NULL, FALSE);
+  wait.loop = loop;
+  webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview),
+                                       script,
+                                       -1,
+                                       GNUPLOT_WORLD,
+                                       NULL,
+                                       NULL,
+                                       export_javascript_finished_cb,
+                                       &wait);
+  if (!wait.complete)
+    g_main_loop_run (loop);
+
+  if (wait.value == NULL) {
+    if (wait.error != NULL)
+      g_propagate_error (error, wait.error);
+    else
+      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                           "Gnuplot export did not return a result.");
+    return FALSE;
+  }
+  if (!jsc_value_is_string (wait.value)) {
+    g_object_unref (wait.value);
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                         "Gnuplot export did not return an HTML document.");
+    return FALSE;
+  }
+
+  rendered = jsc_value_to_string (wait.value);
+  g_object_unref (wait.value);
+  if (rendered == NULL) {
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                         "Gnuplot export did not return an HTML document.");
+    return FALSE;
+  }
+  return g_file_set_contents (outfile, rendered, -1, error);
 }
 
 WebKitPrintOperationResponse
 marker_preview_run_print_dialog(MarkerPreview* preview,
                                 GtkWindow*     parent)
 {
-  WebKitPrintOperation* print_op =
+  g_autoptr (GError) error = NULL;
+  WebKitPrintOperationResponse response;
+  WebKitPrintOperation* print_op;
+
+  if (!marker_preview_wait_for_gnuplot (preview, &error)) {
+    g_warning ("Unable to finish gnuplot preview before printing: %s", error->message);
+    return WEBKIT_PRINT_OPERATION_RESPONSE_CANCEL;
+  }
+
+  print_op =
     webkit_print_operation_new(WEBKIT_WEB_VIEW(preview));
 
   g_signal_connect(print_op, "failed", G_CALLBACK(pdf_print_failed_cb), NULL);
-
-  return webkit_print_operation_run_dialog(print_op, parent);
+  response = webkit_print_operation_run_dialog(print_op, parent);
+  g_object_unref (print_op);
+  return response;
 }
 
-void
+gboolean
 marker_preview_print_pdf(MarkerPreview*     preview,
                          const char*        outfile,
                          enum scidown_paper_size paper_size,
                          GtkPageOrientation orientation)
 
 {
-    WebKitPrintOperation* print_op = NULL;
-    GtkPrintSettings* print_s = NULL;
-    char* uri = g_strdup_printf("file://%s", outfile);
+  g_autoptr (GError) error = NULL;
+  g_autofree gchar *uri = NULL;
+  g_autofree gchar *custom_name = NULL;
+  g_autoptr (GMainLoop) loop = NULL;
+  WebKitPrintOperation *print_op;
+  GtkPrintSettings *print_settings;
+  GtkPageSetup *page_setup;
+  GtkPaperSize *gtk_paper_size;
+  PrintWait wait = {0};
 
-    print_op = webkit_print_operation_new(WEBKIT_WEB_VIEW(preview));
-    g_signal_connect(print_op, "failed", G_CALLBACK(pdf_print_failed_cb), NULL);
+  if (!marker_preview_wait_for_gnuplot (preview, &error)) {
+    g_warning ("Unable to finish gnuplot preview before PDF export: %s", error->message);
+    return FALSE;
+  }
 
-    print_s = gtk_print_settings_new();
-    GtkPaperSize * gtk_paper_size = NULL;
-    if (paper_size != B43 && paper_size != B169)
-      gtk_paper_size = gtk_paper_size_new(paper_to_gtkstr(paper_size));
-    else if (paper_size == B43)
-      gtk_paper_size = gtk_paper_size_new_custom("B43", "B43", 166, 221, GTK_UNIT_MM);
-    else
-      gtk_paper_size = gtk_paper_size_new_custom("B43", "B43", 166, 294, GTK_UNIT_MM);
+  uri = g_filename_to_uri (outfile, NULL, &error);
+  if (uri == NULL) {
+    g_warning ("Unable to create PDF output URI: %s", error->message);
+    return FALSE;
+  }
 
-    GtkPageSetup * gtk_page_setup = gtk_page_setup_new();
+  print_op = webkit_print_operation_new (WEBKIT_WEB_VIEW (preview));
+  print_settings = gtk_print_settings_new ();
+  page_setup = gtk_page_setup_new ();
+  if (paper_size == B43)
+    gtk_paper_size = gtk_paper_size_new_custom ("B43", "B43", 166, 221, GTK_UNIT_MM);
+  else if (paper_size == B169)
+    gtk_paper_size = gtk_paper_size_new_custom ("B169", "B169", 166, 294, GTK_UNIT_MM);
+  else
+    gtk_paper_size = gtk_paper_size_new (paper_to_gtkstr (paper_size));
 
-    gtk_print_settings_set(print_s, GTK_PRINT_SETTINGS_OUTPUT_FILE_FORMAT, "pdf");
-    gtk_print_settings_set(print_s, GTK_PRINT_SETTINGS_OUTPUT_URI, uri);
-    gtk_print_settings_set(print_s, GTK_PRINT_SETTINGS_PRINTER, dgettext ("gtk30", "Print to File"));
+  gtk_print_settings_set (print_settings, GTK_PRINT_SETTINGS_OUTPUT_FILE_FORMAT, "pdf");
+  gtk_print_settings_set (print_settings, GTK_PRINT_SETTINGS_OUTPUT_URI, uri);
+  gtk_print_settings_set (print_settings, GTK_PRINT_SETTINGS_PRINTER,
+                          dgettext ("gtk30", "Print to File"));
 
-    if (orientation == GTK_PAGE_ORIENTATION_PORTRAIT) {
-      gtk_page_setup_set_paper_size(gtk_page_setup, gtk_paper_size);
-      gtk_print_settings_set_paper_width(print_s, gtk_paper_size_get_width(gtk_paper_size, GTK_UNIT_MM), GTK_UNIT_MM);
-      gtk_print_settings_set_paper_height(print_s, gtk_paper_size_get_height(gtk_paper_size, GTK_UNIT_MM), GTK_UNIT_MM);
+  if (orientation == GTK_PAGE_ORIENTATION_PORTRAIT) {
+    gtk_page_setup_set_paper_size (page_setup, gtk_paper_size);
+    gtk_print_settings_set_paper_width (
+      print_settings,
+      gtk_paper_size_get_width (gtk_paper_size, GTK_UNIT_MM),
+      GTK_UNIT_MM);
+    gtk_print_settings_set_paper_height (
+      print_settings,
+      gtk_paper_size_get_height (gtk_paper_size, GTK_UNIT_MM),
+      GTK_UNIT_MM);
+  } else {
+    gdouble width = gtk_paper_size_get_width (gtk_paper_size, GTK_UNIT_MM);
+    gdouble height = gtk_paper_size_get_height (gtk_paper_size, GTK_UNIT_MM);
+    custom_name = g_strdup_printf ("%s_landscape", paper_to_string (paper_size));
+    GtkPaperSize *custom_size = gtk_paper_size_new_custom (custom_name,
+                                                           "pdf",
+                                                           height,
+                                                           width,
+                                                           GTK_UNIT_MM);
+    gtk_page_setup_set_paper_size (page_setup, custom_size);
+    gtk_paper_size_free (custom_size);
+    gtk_print_settings_set_paper_width (print_settings, height, GTK_UNIT_MM);
+    gtk_print_settings_set_paper_height (print_settings, width, GTK_UNIT_MM);
+  }
+  gtk_paper_size_free (gtk_paper_size);
 
-    } else {
-      gdouble width = gtk_paper_size_get_width(gtk_paper_size, GTK_UNIT_MM);
-      gdouble height = gtk_paper_size_get_height(gtk_paper_size, GTK_UNIT_MM);
-      GtkPaperSize * custom_size = gtk_paper_size_new_custom(g_strdup_printf("%s_landscape", paper_to_string(paper_size)),
-                                                             "pdf", height, width, GTK_UNIT_MM);
-      gtk_page_setup_set_paper_size(gtk_page_setup, custom_size);
+  if (paper_size == B43 || paper_size == B169) {
+    gtk_page_setup_set_left_margin (page_setup, 0, GTK_UNIT_POINTS);
+    gtk_page_setup_set_right_margin (page_setup, 0, GTK_UNIT_POINTS);
+    gtk_page_setup_set_top_margin (page_setup, 0, GTK_UNIT_POINTS);
+    gtk_page_setup_set_bottom_margin (page_setup, 0, GTK_UNIT_POINTS);
+  }
+  gtk_print_settings_set_orientation (print_settings, orientation);
+  webkit_print_operation_set_print_settings (print_op, print_settings);
+  webkit_print_operation_set_page_setup (print_op, page_setup);
 
-      gtk_print_settings_set_paper_width(print_s, height, GTK_UNIT_MM);
-      gtk_print_settings_set_paper_height(print_s, width, GTK_UNIT_MM);
-    }
-    if (paper_size == B43 || paper_size == B169) {
-      gtk_page_setup_set_left_margin(gtk_page_setup, 0, GTK_UNIT_POINTS);
-      gtk_page_setup_set_right_margin(gtk_page_setup, 0, GTK_UNIT_POINTS);
-      gtk_page_setup_set_top_margin(gtk_page_setup, 0, GTK_UNIT_POINTS);
-      gtk_page_setup_set_bottom_margin(gtk_page_setup, 0, GTK_UNIT_POINTS);
-    }
-    gtk_print_settings_set_orientation(print_s, orientation);
+  loop = g_main_loop_new (NULL, FALSE);
+  wait.loop = loop;
+  g_signal_connect (print_op, "failed", G_CALLBACK (pdf_print_wait_failed_cb), &wait);
+  g_signal_connect (print_op, "finished", G_CALLBACK (pdf_print_finished_cb), &wait);
+  webkit_print_operation_print (print_op);
+  if (!wait.complete)
+    g_main_loop_run (loop);
 
-    webkit_print_operation_set_print_settings(print_op, print_s);
-    webkit_print_operation_set_page_setup(print_op, gtk_page_setup);
-
-    webkit_print_operation_print(print_op);
-
-    g_free(uri);
+  g_object_unref (page_setup);
+  g_object_unref (print_settings);
+  g_object_unref (print_op);
+  return !wait.failed;
 }
 
 void

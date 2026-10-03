@@ -32,14 +32,13 @@ gchar *
 marker_utils_read_file (const char* infile, long *out_size)
 {
   gchar *contents = NULL;
-  FILE *file = fopen (infile, "r");
-  fseek (file, 0, SEEK_END);
-  long size = ftell (file);
-  *out_size = size;
-  rewind (file);
-  contents = g_malloc (size);
-  fread (contents, size, 1, file);
-  fclose (file);
+  gsize size = 0;
+
+  if (!g_file_get_contents (infile, &contents, &size, NULL)) {
+    *out_size = 0;
+    return NULL;
+  }
+  *out_size = (long) size;
   return contents;
 }
 

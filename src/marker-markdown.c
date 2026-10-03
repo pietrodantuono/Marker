@@ -115,7 +115,7 @@ char* html_header(MarkerMathJSMode    mathjs_mode,
       mermaid_script = g_strdup(" ");
       break;
     case MERMAID_NET:
-      mermaid_script = g_strdup("<script src=\"https://unpkg.com/mermaid@7.1.2/dist/mermaid.min.js\"></script>");
+      mermaid_script = g_strdup("<script src=\"https://unpkg.com/mermaid@12.1.0/dist/mermaid.min.js\"></script>");
       break;
     case MERMAID_LOCAL:
       mermaid_script = g_strdup_printf("<script src=\"file://%smermaid/mermaid.min.js\"></script>", SCRIPTS_DIR);
@@ -176,7 +176,7 @@ html_footer(MarkerMathJSMode     mathjs_mode,
       mermaid_render = g_strdup(" ");
       break;
     default:
-      mermaid_render = g_strdup("<script>mermaid.initialize({startOnLoad:true});</script>");
+      mermaid_render = g_strdup("<script>mermaid.initialize({startOnLoad:true,layout:'dagre',theme:'default',look:'classic'});</script>");
       break;
   }
 
@@ -229,23 +229,9 @@ marker_markdown_css(const char* css_link)
   }
   buffer_.location = g_strdup(css_link);
   buffer_.css = NULL;
-  FILE* fp = NULL;
   gchar * path = g_strdup_printf("%s%s", STYLES_DIR, css_link);
-  fp = fopen(path, "r");
+  g_file_get_contents(path, &buffer_.css, NULL, NULL);
   g_free(path);
-  
-  if (fp)
-  {
-    
-    fseek(fp , 0 , SEEK_END);
-    long size = ftell(fp);
-    rewind(fp);
-
-    buffer_.css = (char*) malloc(sizeof(char) * size);
-    fread(buffer_.css, 1, size, fp);
-
-    fclose(fp);
-  }
 
   return buffer_.css;
 }
@@ -258,23 +244,9 @@ marker_markdown_scidown_css()
   }
 
   buffer_.scidown = NULL;
-  FILE* fp = NULL;
-  gchar * path = g_strdup_printf("%s%s", STYLES_DIR, "scidown.css");
-  fp = fopen(path, "r");
+  gchar * path = g_strdup_printf("%s%s", COMMON_DIR, "scidown.css");
+  g_file_get_contents(path, &buffer_.scidown, NULL, NULL);
   g_free(path);
-  
-  if (fp)
-  {
-    
-    fseek(fp , 0 , SEEK_END);
-    long size = ftell(fp);
-    rewind(fp);
-
-    buffer_.scidown = (char*) malloc(sizeof(char) * size);
-    fread(buffer_.scidown, 1, size, fp);
-
-    fclose(fp);
-  }
 
   return buffer_.scidown;
 }
@@ -365,24 +337,14 @@ marker_markdown_to_html_with_css_inline(const char*         markdown,
     char * old = header;
     header = g_strdup_printf("%s<style>\n%s\n%s\n</style>\n", header, inline_css, common_css);
     free(old);
-    free(common_css);
-    free(inline_css);
-    inline_css = NULL;
-    common_css = NULL;
   } else if (inline_css) {
     char * old = header;
     header = g_strdup_printf("%s<style>\n%s\n</style>\n", header, inline_css);
     free(old);
-    free(inline_css);
-    inline_css = NULL;
-    common_css = NULL;
   } else if (common_css) {
     char * old = header;
     header = g_strdup_printf("%s<style>\n%s\n</style>\n", header, common_css);
     free(old);
-    free(common_css);
-    inline_css = NULL;
-    common_css = NULL;
   }
 
 
