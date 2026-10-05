@@ -1,9 +1,9 @@
 # Current status
 
-Current phase: Phase 6 complete — inline rich elements in Formatted Markdown.
-Current task: None; implementation and local installation complete.
-Last completed task: Final optimized package reinstalled; 11/11 suites pass, final diff/lifecycle review and tracking handoff complete.
-Next task: Save and restart an already-running app to load the installed build; use the documented desktop-integration follow-up if needed.
+Current phase: Documentation and fork merge follow-up; Phase 6 implementation complete.
+Current task: Commit/push rewritten README and prepare the fork pull request.
+Last completed task: README rewritten/validated with current captures and creator credits; donation section/image removed; SDK rebuild passes.
+Next task: Create a PR into fork master using an authenticated GitHub session; user will approve and merge.
 
 # Completed
 
@@ -70,12 +70,19 @@ Next task: Save and restart an already-running app to load the installed build; 
   stale-result cancellation and editable failure/retry surfaces. Formatted numbers
   omit compressed ranges. Shared math fences and notebook-relative draft assets work
   in normal previews too. Three synthetic captures reviewed; final optimized package
-  rebuilt and reinstalled into the user's existing app. This follow-up is uncommitted.
+  rebuilt and reinstalled into the user's existing app. Committed as 144927f2 and
+  pushed to origin/feature/workspace-theme-preferences over SSH.
 
 # In progress
 
-- None. Follow-up requested 2026-10-05 is implemented; explicit remaining deferrals
-  are listed in TASKS and the final handoff.
+- User authorized preparing the outlined README/feature result as a PR and will
+  approve and merge themselves. Documentation is ready for commit/push.
+- Fork SSH access works. CLI/API authentication is absent and Playwright's GitHub
+  comparison shows Sign in; an authenticated GitHub session is required to create PRs.
+
+- GitHub API authentication is unavailable (no GH_TOKEN/GITHUB_TOKEN or authenticated
+  CLI). SSH fetch/push is available. A remote PR merge requires an authenticated
+  GitHub session. Do not update master automatically: the user now owns the merge.
 
 # Discovered issues
 
@@ -126,6 +133,12 @@ Next task: Save and restart an already-running app to load the installed build; 
   Swiss is enabled by default and overrides the preview's base font.
 
 # Validation performed
+
+- README follow-up: 15 local links/anchors exist; 11 shell snippets pass bash -n.
+  Current light-wide/rich-dark captures reviewed; dependencies/labels/submodule
+  chain checked against this checkout. Donation image has no code/resource/package
+  references and is removed. SDK rebuild passes; final diff passes whitespace review.
+  .codex/PULL_REQUEST.md contains the prepared review description for fork master.
 
 - Phase 6: Unicode/protected/incomplete/one-column-table/multiline-math discovery;
   real image/math/table/gnuplot/Mermaid output; Source/Render, native edit/undo,
@@ -283,7 +296,11 @@ editable source with local explanation/retry. Preferences, notebook CSS and link
 CSV changes refresh output. Normal preview/export also support math fences, and
 unsaved notebook drafts resolve relative assets against their notebook root.
 README documents use and limits. The optimized Flatpak is rebuilt and installed
-in the user's existing local installation. This follow-up has no commits or pushes.
+in the user's existing local installation.
+
+Subsequent documentation/merge request authorized committing the inline-rich work.
+It is now 144927f2 on origin/feature/workspace-theme-preferences. The README is
+rewritten and validated; the user will review and merge the requested fork PR.
 
 ## Important architectural decisions
 
@@ -336,4 +353,9 @@ Save any running documents, close Marker, then launch the installed build with
 a rendered region or Source to edit; Render restores its output. Review the README
 usage section and test representative scientific notebooks, especially unusually
 nested markup. Keep these five tracking files as the implementation source of
-truth. Review and commit this follow-up separately when requested; no push occurred.
+truth. Inline-rich work is committed/pushed as 144927f2. README now uses current
+light/dark captures and task-focused installation/usage/development guidance, credits
+Fabio Colacio/contributors/Folio and removes old package advertising/donations.
+Validate/commit documentation and create the PR with an authenticated GitHub session.
+The user will approve and merge; do not merge or push directly to master. All nested
+renderer commits are reachable in the user's forks. Checkout remains on its feature branch.

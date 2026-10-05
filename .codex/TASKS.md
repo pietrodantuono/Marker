@@ -113,6 +113,24 @@ Legend: [ ] not started; [~] in progress; [x] completed; [!] blocked.
   preserve running documents and stop the task-owned test display.
 - [x] Reconcile tracking documents and final handoff with tested limitations.
 
+## Documentation and fork merge follow-up
+
+- [x] Load documentation-writer; verify README/build files, current captures,
+  original creator/license, repository remotes, fork master and nested pointers.
+- [x] User authorized preparing the outlined documentation as a PR for review.
+  Rewrite README with current installation/workflow/reference sections, screenshots
+  and credits; remove donations and its unused image.
+- [x] Validate 15 local links/anchors, 11 shell examples and current images; compare
+  commands/dependencies with build files and review the diff. SDK rebuild passes.
+- [x] Commit the tested inline-rich feature separately from documentation updates:
+  144927f2; validated production/resource/test diff and the previous 11/11 suite run.
+- [x] Verify fork/submodule reachability and push 144927f2 to the feature branch
+  over SSH. SciDown/Charter/tinyexpr pointers are ancestors of their fork masters.
+- [~] Commit/push documentation and create a pull request into fork master. User
+  will approve and merge; no automated merge. GitHub CLI/API authentication is absent
+  and the available browser is signed out; request an authenticated session if needed.
+- [~] Reconcile PROGRESS with documentation commit/PR evidence and any real blocker.
+
 ## Previous explicit validation deferrals
 
 - [ ] **Deferred: desktop integration acceptance.** Select/accept native Open/New/Locate/Save As chooser paths, Reveal in Files and a physical print dialog on the user's desktop. Xvfb/SDK has no desktop portal, file manager or printer. Impact: the native integration layer is unverified; captured targets, file creation/save/removal and PDF backend paths are exercised. Next: use a disposable notebook in a GNOME desktop session and exercise those actions, including draft Save As cancellation during removal.

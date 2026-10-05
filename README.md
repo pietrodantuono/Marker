@@ -1,106 +1,76 @@
-# <img width="30" src="data/com.github.fabiocolacio.marker.svg"/>Marker
+# <img src="data/com.github.fabiocolacio.marker.svg" width="30" alt="" /> Marker
 
-Marker is a Markdown editor for Linux made with GTK 4 and libadwaita.
+Marker is a Markdown editor for Linux. This [fork maintained by Pietro D'Antuono](https://github.com/pietrodantuono/Marker)
+combines GTK 4 and libadwaita with Folio-inspired notebooks and scientific Markdown.
+Documents remain ordinary Markdown files in folders you control.
 
-**NOTE:** Issues regarding markdown parsing should go to the [scidown repo](https://github.com/mandarancio/scidown).
+- **Notebooks:** colored book icons, Pages/Files navigation, nested folders and search.
+- **Five views:** Editor Only, Preview Only, Dual Pane, Dual Window and Formatted Markdown.
+- **Formatted writing:** centered monospace text, heading controls, an outline and
+  rendered images, equations, tables, gnuplot charts and Mermaid diagrams.
+- **Scientific documents:** SciDown metadata, includes, references, captions,
+  presentations and Charter plots; mathematics through KaTeX or MathJax.
+- **Styles and export:** global themes, notebook-local CSS, HTML/PDF/LaTeX export
+  and optional Pandoc office formats.
 
-## Features
-
-* View and edit markdown documents
-* Open folders as notebooks, with Pages/Files navigation for nested Markdown, images, and data files
-* Switch between source, preview, dual-pane, dual-window, and formatted Markdown views
-* HTML and LaTeX conversion of markdown documents with [scidown](https://github.com/Mandarancio/scidown/)
-  * Support for YAML headers
-  * Document classes
-  * Beamer/presentation mode (`class: beamer`)
-  * Abstract sections
-  * Table of Contents
-  * External document inclusion
-  * Equations, figures, table and listings with reference id and caption
-  * Internal references
-* Extra scientific syntax of SciDown on its [wiki](https://github.com/Mandarancio/scidown/wiki/)
-* TeX math rendering with [KaTeX](https://khan.github.io/KaTeX/) or [MathJax](mathjax.org/)
-* Support for [mermaid](https://mermaidjs.github.io/) diagrams
-* Support for [charter](https://github.com/Mandarancio/charter/) for plotting
-* Sandboxed [gnuplot](https://www.gnuplot.info/) previews in fenced code blocks, including relative CSV, DAT, and TXT data files
-* Syntax highlighting for code blocks with [highlight.js](https://highlightjs.org/)
-* Built-in HTML and PDF export
-* Office document export with [pandoc](https://pandoc.org/)
-  * RTF
-  * ODT
-  * DOCX
-* Custom CSS themes and notebook `.marker.css` overrides
-* Custom syntax themes
-* Native GTK 4 and libadwaita application
+[Install](#install) · [Use Marker](#use-marker) · [Development](#development) ·
+[Limitations](#limitations) · [Credits and license](#credits-and-license)
 
 ## Screenshots
 
-![scrot.png](help/C/figures/scrot.png)
+Notebook navigation, formatted writing and the right-side outline in light mode:
 
-![scrot1.png](help/C/figures/scrot1.png)
+![Marker with a notebook rail, Pages sidebar, centered Markdown and heading outline](.codex/screenshots/light-wide.png)
 
-![scrot2.png](help/C/figures/scrot2.png)
+Images, equations, tables and a gnuplot chart rendered inside Formatted Markdown
+in dark mode:
 
-![slides.png](help/C/figures/slides.png)
+![Marker in dark mode with inline rendered elements and Source controls](.codex/screenshots/rich-dark.png)
 
-## Packages
+## Install
 
-* [Fedora (thanks to @tim77)](https://src.fedoraproject.org/rpms/marker)
-* [Flathub (thanks to @jsparber and @bertob)](https://flathub.org/apps/details/com.github.fabiocolacio.marker)
-* [Arch Linux AUR (thanks to @mmetak)](https://aur.archlinux.org/packages/marker-git/)
-* [Arch Linux official package (thanks to @City-busz)](https://archlinux.org/packages/extra/x86_64/marker/)
-* [Ubuntu PPA Stable (thanks to @apandada1 and @olivierb2)](https://launchpad.net/~apandada1/+archive/ubuntu/marker)
-* [Ubuntu PPA Daily builds (thanks to @apandada1 and @olivierb2)](https://launchpad.net/~apandada1/+archive/ubuntu/marker-daily)
-* [![Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-black.svg)](https://snapcraft.io/marker)
+Build this checkout to get the GTK 4 notebook redesign. Upstream distribution
+packages and older releases may contain a different version.
 
+### Get the source
 
-## Rich elements in Formatted Markdown
+The fork and its nested renderer submodules use SSH. Configure GitHub SSH access,
+then clone all submodules together:
 
-Formatted Markdown shows images, equations, Markdown tables, gnuplot charts and
-Mermaid diagrams within the writing page. Click an element or its **Source**
-button to edit the original Markdown in place; **Render** switches back. Inline
-images and equations reveal their containing paragraph. Keyboard navigation and
-selection into a rendered region also expose its source.
+```bash
+git clone --recurse-submodules git@github.com:pietrodantuono/Marker.git
+cd Marker
+```
 
-Enable mathematics, Mermaid and gnuplot in Preview preferences as needed. Notebook
-styles apply to the rendered elements, and linked gnuplot data changes refresh them.
-Unavailable images or failed plots keep editable source with a retry control.
-Saving, undo and exports use the original Markdown buffer.
+For an existing checkout, synchronize the submodule URLs and initialize every level:
 
-Complex list/quote nesting retains source presentation. Inline snapshots have a
-64 MiB readback budget; oversized documents fall back to source and remain viewable
-in the regular preview. Interactive plot controls and links use the regular preview;
-the inline surface opens source for editing.
+```bash
+git submodule sync --recursive
+git submodule update --init --recursive
+```
 
-## Install this checkout
+The chain is Marker → SciDown → Charter → tinyexpr. Each submodule is pinned to
+a commit; the commands above use those versions. Run the following build commands
+from the repository root.
 
-These instructions install the current GTK 4/Folio redesign from your local
-checkout. Published packages and older release archives may contain a different
-version. Run the build commands from the directory containing `meson.build`.
+### Local Flatpak (recommended)
 
-### Recommended: local Flatpak
-
-Flatpak supplies the required GNOME 50 runtime, so your distribution does not need
-new GTK/WebKit development packages. On Debian/Ubuntu, install the build tools:
+Flatpak supplies GNOME 50 and the required libraries without upgrading your host's
+GTK development packages. On Debian/Ubuntu, install the build tools:
 
 ```bash
 sudo apt install flatpak flatpak-builder elfutils git
 ```
 
-Set up Flathub and install the runtime/SDK if they are not already installed:
+Add Flathub and install the runtime and SDK for your user:
 
 ```bash
-flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install flathub org.gnome.Platform//50 org.gnome.Sdk//50
+flatpak remote-add --user --if-not-exists flathub \
+  https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user flathub org.gnome.Platform//50 org.gnome.Sdk//50
 ```
 
-For a fresh clone, initialize the renderer submodules before building:
-
-```bash
-git submodule update --init --recursive
-```
-
-Build the local sources and install Marker for your user:
+Build, install and launch:
 
 ```bash
 flatpak-builder --force-clean --state-dir=build-flatpak-state \
@@ -109,46 +79,45 @@ flatpak install --user build-flatpak-repo com.github.fabiocolacio.marker
 flatpak run --user com.github.fabiocolacio.marker
 ```
 
-Marker also appears in your application launcher. This installs the checkout's
-build, independently of a system-wide Marker package. The app has access to your
-home directory for notebook folders. Flatpak settings/state use its application
-profile; a native installation's profile is not automatically imported.
+Marker also appears in your application launcher. It can access notebook folders
+in your home directory. Flatpak uses its own application profile; settings from
+a native installation are not automatically imported.
 
-To update after changing the source, close Marker, rerun the builder command,
-then replace the user installation:
+To update, save your documents and close Marker. Pull changes and update submodules:
+
+```bash
+git pull --ff-only
+git submodule sync --recursive
+git submodule update --init --recursive
+```
+
+Rerun the builder command above, then replace the installed build:
 
 ```bash
 flatpak install --user --reinstall build-flatpak-repo com.github.fabiocolacio.marker
 ```
 
-To remove the app while retaining its profile and notebook folders:
+To uninstall while keeping your profile and notebook folders:
 
 ```bash
 flatpak uninstall --user com.github.fabiocolacio.marker
 ```
 
-HTML and PDF export, mathematics, diagrams and the bundled gnuplot WebAssembly
-renderer are included. The manifest does not bundle Pandoc; DOCX/ODT/RTF export
-requires Pandoc inside the app's environment, not just installed on the host.
-See the [Flatpak build guide](https://docs.flatpak.org/en/latest/first-build.html)
-and [builder options](https://docs.flatpak.org/en/latest/flatpak-builder-command-reference.html)
-for the underlying build/export/install workflow.
-
 ### Native installation
 
-Use this route when the host provides **all** of these development dependencies:
+Use this route when your distribution provides every development dependency:
 
-* C compiler, pkg-config, Meson and Ninja
-* GTK >= 4.18
-* libadwaita >= 1.7
-* GtkSourceView >= 5.14
-* WebKitGTK >= 2.50 with the 6.0 API
-* GLib/GIO and libsoup 3
-* libspelling >= 0.4.10 (Meson can download the pinned fallback)
-* gettext and itstool
-* pandoc (optional, for DOCX/ODT/RTF export)
+| Dependency | Requirement |
+|---|---|
+| Build tools | C compiler, pkg-config, Meson, Ninja, gettext, itstool |
+| GTK | 4.18 or newer |
+| libadwaita | 1.7 or newer |
+| GtkSourceView | 5.14 or newer |
+| WebKitGTK | 2.50 or newer, using the 6.0 API |
+| Other libraries | GLib/GIO, libsoup 3, libspelling 0.4.10 or newer |
 
-After initializing the submodules as above, use a fresh native build directory:
+Meson can fetch the pinned libspelling fallback. Pandoc is optional for office
+export. After cloning the submodules, use a fresh build directory:
 
 ```bash
 meson setup build-native --prefix=/usr/local --buildtype=release
@@ -158,23 +127,77 @@ meson test -C build-native --print-errorlogs
 marker
 ```
 
-Install the assets before running GUI/export tests; they use the configured prefix.
-An old `build` directory configured for GTK 3 retains its old dependencies and
-source paths. Use `build-native` for this branch. Installing `libgtk-4-dev` alone
-is insufficient when its GTK version is below 4.18 or other dependencies are
-missing. The native commands require compatible host libraries; an SDK-built
-binary should run in its matching Flatpak environment.
+Install assets before running GUI/export tests. An old GTK 3 build directory keeps
+its old configuration; use `build-native` for this fork. Installing `libgtk-4-dev`
+alone is insufficient if its version or the remaining dependencies are too old.
 
-### SDK development build
+## Use Marker
 
-For development without replacing host libraries, start a GNOME 50 SDK shell:
+### Open a notebook and add pages
+
+Use the **+** control in the notebook rail to create or open a notebook, or choose
+**Open… → Open Notebook…** in the main menu. A notebook is a folder, so existing
+Markdown, images and data files stay together.
+
+Select a book icon, then use **New Page** in the page sidebar. **Pages** lists
+Markdown documents and open drafts. **Files** browses nested assets and stylesheets.
+The search control filters the active navigation mode. Standalone documents remain
+available under **Open Files**.
+
+Right-click or long-press a notebook to edit its name, icon and color, reveal its
+folder, change its rail order or remove it from Marker. **Remove** preserves the
+folder and asks how to handle unsaved documents. Renaming a notebook changes its
+display name, not its folder name.
+
+### Write with rendered elements
+
+Choose **Formatted Markdown** from the document's view-mode control. Headings show
+H1–H6 gutter markers; the formatting toolbar includes a heading-level chooser.
+The **Outline** control opens the heading list on the right. Navigation and outline
+become overlays when the window is narrower.
+
+Images, equations, tables, gnuplot charts and Mermaid diagrams render in the writing
+page. Click an element or **Source** to edit its original Markdown; **Render**
+switches back. Inline images and equations reveal their containing paragraph.
+Caret movement, search and selection into a rendered region expose source too.
+Editing, undo and saving all use the same Markdown buffer.
+
+In **Preferences → Preview**, enable **Render mathematics**, **Enable Mermaid**
+and **Enable gnuplot** as needed. Gnuplot uses fenced `gnuplot` blocks and can load
+relative CSV, DAT and TXT files. Changes to linked data refresh the chart.
+Missing images or failed renders leave editable source with an explanation and
+a retry control.
+
+### Set notebook styles
+
+Open the notebook title menu and choose **Edit Notebook Styles**. Marker creates
+`.marker.css` at the notebook root if it is absent and opens it in CSS source mode.
+Save your edits to refresh the notebook's previews and inline rendered elements.
+The stylesheet appears under **Files**, rather than **Pages**.
+
+Normal notebook CSS rules override renderer defaults, the global preview theme
+and font/color preferences. CSS `!important` follows standard layer semantics.
+Stylesheet-relative URLs resolve from the notebook, and HTML/PDF export uses the
+same effective style cascade.
+
+### Save and export
+
+Save is available when a document has unsaved changes. The document overflow menu
+contains **Save As**, **Export** and **Print**, alongside source search and window
+options. HTML, PDF and LaTeX export are built in. DOCX, ODT and RTF need Pandoc;
+the local Flatpak manifest does not bundle it, so those formats require Pandoc
+inside the app's environment.
+
+## Development
+
+To build without changing host libraries, open a GNOME 50 SDK shell from the
+repository root:
 
 ```bash
 flatpak run --filesystem="$PWD" --command=sh org.gnome.Sdk//50
 ```
 
-Run the following **inside that shell**; the prefix keeps the installation in the
-checkout rather than changing the host:
+Run these commands **inside the SDK shell**:
 
 ```bash
 meson setup build-sdk --prefix="$PWD/build-sdk/install"
@@ -184,11 +207,39 @@ meson test -C build-sdk --print-errorlogs
 exit
 ```
 
-GUI tests require a display and installed assets; unavailable display checks are
-reported as skipped. Use the local Flatpak route above for a desktop installation.
+GUI tests need a display and installed assets; unavailable display checks report
+skips. Run SDK-built binaries in that SDK environment. Use the local Flatpak build
+for a desktop installation.
 
-## Donations/Tips
+See [CONTRIBUTING.md](CONTRIBUTING.md) for coding conventions. The persistent
+[feature specification](.codex/FEATURE.md), [plan](.codex/PLAN.md),
+[tasks](.codex/TASKS.md), [decisions](.codex/DECISIONS.md) and
+[progress](.codex/PROGRESS.md) record the redesign and its validation.
 
-If you like Marker and would like to support the development of this project, please donate below!
+## Limitations
 
-[<img height="30" src="donate.png" alt="PayPal"/>](https://www.paypal.me/fabiocolacio)
+- Inline rendered regions are visual snapshots. Use regular preview for links
+  and interactive chart controls; clicking an inline region opens its source.
+- Complex list/quote nesting keeps source presentation. Oversized documents exceed
+  the 64 MiB snapshot readback budget and fall back to source; regular preview remains available.
+- Exported HTML keeps local stylesheet and asset references. Keep those files
+  alongside the export when moving it. Notebook CSS parity applies to HTML/PDF,
+  rather than LaTeX or Pandoc office formats.
+- Native desktop chooser, file-manager and physical-printer checks, plus Debian
+  package builds, remain documented validation follow-ups in the tracking files.
+
+## Credits and license
+
+Marker was created by **[Fábio Colácio](https://github.com/fabiocolacio)**.
+This fork builds on [the original Marker project](https://github.com/fabiocolacio/Marker)
+and the work of Martino Ferrari and the Marker community. Thank you for the editor
+and scientific-document foundations that make this continuation possible.
+
+The notebook interface is inspired by [Folio](https://github.com/toolstack/Folio).
+Book geometry and notebook symbols are credited in [the icon attribution](src/resources/icons/ATTRIBUTION.md).
+Scientific rendering uses [SciDown](https://github.com/Mandarancio/scidown) and
+[Charter](https://github.com/Mandarancio/charter); the app also uses KaTeX/MathJax,
+Mermaid, highlight.js and gnuplot. Bundled components retain their own license notices.
+
+Marker is distributed under the **GNU General Public License, version 3**;
+see [LICENSE.md](LICENSE.md).

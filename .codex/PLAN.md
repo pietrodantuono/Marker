@@ -176,6 +176,23 @@ machine can clone the parent feature commit. Full Debian release builds remain d
   annotation issue). Separate discovery/presentation, bound memory and discard
   async results after edits/teardown. Export consumes canonical source normally.
 
+## Documentation and fork merge follow-up
+
+Rewrite README for Linux users installing/using this fork: overview, current
+application captures, SSH recursive clone/local Flatpak how-to, notebook/editor/CSS/
+export workflows, development requirements, known limits, creator/dependency credits
+and license. The user has authorized preparing the outlined result as a PR for
+their review; follow documentation-writer's audience/task/type separation.
+Remove old screenshot/package advertising and donation links; retain upstream
+attribution and existing licenses. Validate commands against current build files and
+all local image/anchor links. Commit the already-tested inline-rich feature separately
+from the README/tracking update. Fetch the fork, verify nested commits are reachable,
+push the feature branch over SSH and create a pull request into fork master. The
+latest instruction reserves approval and merge for the user; do not merge or push
+directly to a default branch. If GitHub authentication is unavailable, retain the
+exact PR title/body and a prefilled creation link; request an authenticated session
+without claiming a PR was created.
+
 ## Build and validation commands
 
 Host GTK 4.14.5 headers are installed, below the 4.18 branch minimum; the other
