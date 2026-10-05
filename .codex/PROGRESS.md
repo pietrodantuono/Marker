@@ -1,9 +1,9 @@
 # Current status
 
 Current phase: Documentation and fork merge follow-up; Phase 6 implementation complete.
-Current task: Commit/push rewritten README and prepare the fork pull request.
-Last completed task: README rewritten/validated with current captures and creator credits; donation section/image removed; SDK rebuild passes.
-Next task: Create a PR into fork master using an authenticated GitHub session; user will approve and merge.
+Current task: PR creation awaits GitHub authentication; documentation is committed/pushed.
+Last completed task: ebecce3f publishes rewritten README/current screenshots/creator credits and removes donations; GitHub images load and SDK rebuild passes.
+Next task: After GitHub authentication, check for an existing matching PR and create one into fork master; user will approve and merge.
 
 # Completed
 
@@ -72,11 +72,15 @@ Next task: Create a PR into fork master using an authenticated GitHub session; u
   in normal previews too. Three synthetic captures reviewed; final optimized package
   rebuilt and reinstalled into the user's existing app. Committed as 144927f2 and
   pushed to origin/feature/workspace-theme-preferences over SSH.
+- README/PR preparation: ebecce3f rewrites the fork overview, SSH recursive clone,
+  installation/update/uninstall, notebook/editor/styles/export usage, development,
+  limits and creator/dependency credits. Current screenshots replace GTK3 captures;
+  donation section and its unreferenced image are removed. Exact review description
+  is in PULL_REQUEST.md. SSH push succeeds; user will handle approval and merge.
 
 # In progress
 
-- User authorized preparing the outlined README/feature result as a PR and will
-  approve and merge themselves. Documentation is ready for commit/push.
+- PR creation only. User owns approval/merge; documentation is committed/pushed.
 - Fork SSH access works. CLI/API authentication is absent and Playwright's GitHub
   comparison shows Sign in; an authenticated GitHub session is required to create PRs.
 
@@ -139,6 +143,9 @@ Next task: Create a PR into fork master using an authenticated GitHub session; u
   chain checked against this checkout. Donation image has no code/resource/package
   references and is removed. SDK rebuild passes; final diff passes whitespace review.
   .codex/PULL_REQUEST.md contains the prepared review description for fork master.
+- Published README renders on GitHub; logo and both screenshots load with their
+  expected dimensions. GitHub comparison targets this fork master and reports
+  Able to merge. No authenticated CLI/API/browser session is available to submit PR.
 
 - Phase 6: Unicode/protected/incomplete/one-column-table/multiline-math discovery;
   real image/math/table/gnuplot/Mermaid output; Source/Render, native edit/undo,
@@ -299,8 +306,9 @@ README documents use and limits. The optimized Flatpak is rebuilt and installed
 in the user's existing local installation.
 
 Subsequent documentation/merge request authorized committing the inline-rich work.
-It is now 144927f2 on origin/feature/workspace-theme-preferences. The README is
-rewritten and validated; the user will review and merge the requested fork PR.
+It is now 144927f2 on origin/feature/workspace-theme-preferences. README and PR
+description are rewritten, validated and published as ebecce3f; PR submission awaits
+GitHub authentication. No PR number or remote master merge is claimed.
 
 ## Important architectural decisions
 
@@ -356,6 +364,12 @@ nested markup. Keep these five tracking files as the implementation source of
 truth. Inline-rich work is committed/pushed as 144927f2. README now uses current
 light/dark captures and task-focused installation/usage/development guidance, credits
 Fabio Colacio/contributors/Folio and removes old package advertising/donations.
-Validate/commit documentation and create the PR with an authenticated GitHub session.
-The user will approve and merge; do not merge or push directly to master. All nested
-renderer commits are reachable in the user's forks. Checkout remains on its feature branch.
+Documentation is committed/pushed as ebecce3f. CLI/API authentication is absent and
+the available browser is signed out. After gh auth login, check existing PRs with
+gh pr list --repo pietrodantuono/Marker --base master --head feature/workspace-theme-preferences.
+Create a PR using PULL_REQUEST.md for its description and its first heading for the
+title. A browser alternative is the fork's compare/master...feature/workspace-theme-preferences
+page; the prepared title/body can be pasted there. User will approve and merge;
+do not merge or push directly to master. Nested renderer commits are reachable in
+the user's forks. Checkout remains on its feature branch. Authentication question
+is pending; do not invent a PR number or mark submission complete without evidence.

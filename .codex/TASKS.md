@@ -126,10 +126,15 @@ Legend: [ ] not started; [~] in progress; [x] completed; [!] blocked.
   144927f2; validated production/resource/test diff and the previous 11/11 suite run.
 - [x] Verify fork/submodule reachability and push 144927f2 to the feature branch
   over SSH. SciDown/Charter/tinyexpr pointers are ancestors of their fork masters.
-- [~] Commit/push documentation and create a pull request into fork master. User
-  will approve and merge; no automated merge. GitHub CLI/API authentication is absent
-  and the available browser is signed out; request an authenticated session if needed.
-- [~] Reconcile PROGRESS with documentation commit/PR evidence and any real blocker.
+- [x] Commit/push rewritten README and PR description as ebecce3f. Verify GitHub
+  renders the document and loads both current screenshots; SSH publication succeeds.
+- [!] Create a pull request into fork master. User will approve and merge; no
+  automated merge. CLI/API authentication is absent and the browser is signed out.
+  Authentication requested asynchronously; title/body are in PULL_REQUEST.md and
+  a prefilled compare URL is ready. Resume with gh pr create after authentication,
+  checking for an existing matching PR first to avoid duplicates.
+- [x] Reconcile PROGRESS with documentation commit/push evidence and the remaining
+  PR authentication blocker. Reconcile it again after actual PR creation.
 
 ## Previous explicit validation deferrals
 
