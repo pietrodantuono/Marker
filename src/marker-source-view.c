@@ -11,6 +11,7 @@
 
 #include "marker-formatted.h"
 #include "marker-heading-gutter.h"
+#include "marker-line-gutter.h"
 #include "marker-prefs.h"
 
 struct _MarkerSourceView
@@ -25,6 +26,7 @@ struct _MarkerSourceView
   MarkerMarkdownStructure *structure;
   GPtrArray *spans;
   GtkSourceGutterRenderer *heading_gutter;
+  GtkSourceGutterRenderer *line_gutter;
   guint format_source;
   guint writing_width;
   gboolean formatted;
@@ -34,7 +36,7 @@ struct _MarkerSourceView
 
 G_DEFINE_TYPE (MarkerSourceView, marker_source_view, GTK_SOURCE_TYPE_VIEW)
 
-enum { STRUCTURE_CHANGED, CURSOR_CHANGED, LAST_SIGNAL };
+enum { STRUCTURE_CHANGED, CURSOR_CHANGED, LAYOUT_CHANGED, LAST_SIGNAL };
 static guint source_signals[LAST_SIGNAL];
 
 static void
@@ -104,6 +106,7 @@ buffer_changed_cb (GtkTextBuffer    *buffer,
                    MarkerSourceView *self)
 {
   self->parse_dirty = TRUE;
+  gtk_widget_queue_resize (GTK_WIDGET (self->line_gutter));
   queue_format (self);
 }
 
@@ -140,6 +143,7 @@ marker_source_view_size_allocate (GtkWidget *widget,
                                                                      width,
                                                                      height,
                                                                      baseline);
+  g_signal_emit (self, source_signals[LAYOUT_CHANGED], 0);
 }
 
 static void
@@ -174,6 +178,21 @@ marker_source_view_class_init (MarkerSourceViewClass *klass)
     G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
   source_signals[CURSOR_CHANGED] = g_signal_new ("cursor-changed", G_TYPE_FROM_CLASS (klass),
     G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+  source_signals[LAYOUT_CHANGED] = g_signal_new ("layout-changed", G_TYPE_FROM_CLASS (klass),
+    G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+}
+
+static void
+sync_line_gutter (MarkerSourceView *self)
+{
+  gboolean show = gtk_source_view_get_show_line_numbers (GTK_SOURCE_VIEW (self));
+  GtkSourceGutter *gutter = gtk_source_view_get_gutter (GTK_SOURCE_VIEW (self), GTK_TEXT_WINDOW_LEFT);
+  for (GtkWidget *child = gtk_widget_get_first_child (GTK_WIDGET (gutter)); child != NULL;
+       child = gtk_widget_get_next_sibling (child))
+    if (GTK_SOURCE_IS_GUTTER_RENDERER_TEXT (child) && child != GTK_WIDGET (self->heading_gutter) &&
+        child != GTK_WIDGET (self->line_gutter))
+      gtk_widget_set_visible (child, show && !self->formatted);
+  gtk_widget_set_visible (GTK_WIDGET (self->line_gutter), show && self->formatted);
 }
 
 static void
@@ -195,6 +214,11 @@ marker_source_view_init (MarkerSourceView *self)
   gtk_source_gutter_insert (gtk_source_view_get_gutter (GTK_SOURCE_VIEW (self), GTK_TEXT_WINDOW_LEFT),
                             self->heading_gutter, -20);
   gtk_widget_set_visible (GTK_WIDGET (self->heading_gutter), FALSE);
+  self->line_gutter = marker_line_gutter_new ();
+  gtk_source_gutter_insert (gtk_source_view_get_gutter (GTK_SOURCE_VIEW (self), GTK_TEXT_WINDOW_LEFT),
+                            self->line_gutter, -30);
+  gtk_widget_set_visible (GTK_WIDGET (self->line_gutter), FALSE);
+  g_signal_connect_swapped (self, "notify::show-line-numbers", G_CALLBACK (sync_line_gutter), self);
   gtk_text_view_set_top_margin (GTK_TEXT_VIEW (self), 40);
   gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (self), 64);
   gtk_text_view_set_left_margin (GTK_TEXT_VIEW (self), 18);
@@ -483,6 +507,7 @@ marker_source_view_set_formatted (MarkerSourceView *self,
   gtk_source_view_set_show_line_numbers (GTK_SOURCE_VIEW (self), marker_prefs_get_show_line_numbers ());
   gtk_source_view_set_show_right_margin (GTK_SOURCE_VIEW (self), !formatted && marker_prefs_get_show_right_margin ());
   gtk_widget_set_visible (GTK_WIDGET (self->heading_gutter), formatted);
+  sync_line_gutter (self);
   gtk_widget_set_name (GTK_WIDGET (self), formatted ? "formatted-source" : "source");
   g_autofree char *theme = marker_prefs_get_syntax_theme ();
   marker_source_view_set_syntax_theme (self, theme);

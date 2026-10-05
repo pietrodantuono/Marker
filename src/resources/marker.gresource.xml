@@ -4,6 +4,7 @@
     <file>styles/marker-preview-dark.css</file>
     <file>styles/marker-preview-base.css</file>
     <file>styles/marker.css</file>
+    <file>scripts/marker-rich-snapshot.js</file>
     <file>icons/ATTRIBUTION.md</file>
     <file>icons/scalable/actions/icon-car-symbolic.svg</file>
     <file>icons/scalable/actions/icon-code-symbolic.svg</file>

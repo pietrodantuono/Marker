@@ -1,5 +1,46 @@
 # Decisions
 
+## Decision: native rendered-region overlays over the canonical buffer
+
+Status: accepted
+Date: 2026-10-05
+
+### Context
+
+Formatted Markdown currently applies text tags only. Real images/math/tables/plots
+already render in MarkerPreview. GtkSourceView invisible ranges have caused gutter
+annotation faults; inserted child anchors would change canonical source offsets.
+
+### Decision
+
+Keep GtkSourceBuffer/SourceView editing and undo. A dedicated presentation controller
+discovers whole renderable regions with the existing protected-block structure,
+renders an annotated copy in one offscreen MarkerPreview, and displays bounded
+textures as native scrolling overlays. Non-invisible tags reserve layout space.
+Click/Source reveals original source; Render switches back. Inline math/images use
+their containing paragraph. Rendering failures retain source. Exports remain normal
+canonical-source renders; appearance and scientific runtimes are shared.
+
+### Alternatives considered
+
+WebKit contenteditable document (replaces native editing/undo/spelling/gutters);
+projection buffer with anchors (duplicates document synchronization); one WebKit
+per element (heavy process/widget lifecycle); raw invisible tags (known bug).
+
+### Consequences
+
+Rendered output is a visual surface with an accessible Source control, not a second
+text editor. Whole-paragraph source editing keeps inline content coherent. Snapshot
+memory is bounded; async generations reject stale ranges after edits/mode changes.
+Unsupported nested syntax retains editable source rather than guessing boundaries.
+The renderer is created only when a formatted document has renderable regions.
+GTK overlay removal requires one zero-measure layer that owns normal widget children;
+its empty shell stays with SourceView until disposal. A formatted-only native number
+gutter suppresses numbers on compressed ranges and restores them in source context.
+Snapshot coordinates account for display scale, with a 64 MiB readback budget.
+Shared math-fence normalization and notebook-root draft asset resolution also fix
+normal preview/export behavior without adding separate rendering paths.
+
 ## Decision: native column dividers and shared monospace defaults
 
 Status: accepted

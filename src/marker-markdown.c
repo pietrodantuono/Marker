@@ -150,10 +150,12 @@ html_footer(MarkerMathJSMode     mathjs_mode,
       break;
     case MATHJS_NET:
     case MATHJS_LOCAL:
-      if (backend == KATEX)
-        mathjs_render = g_strdup("<script>renderMathInElement(document.body);</script>");
-      else
-        mathjs_render = g_strdup(" ");
+      mathjs_render = g_strdup_printf (
+        "<script>document.querySelectorAll('pre > code.language-math, pre > code.language-tex, pre > code.language-latex')"
+        ".forEach(code=>{const math=document.createElement('div');math.className='marker-math-block';"
+        "math.textContent='$$\\n'+code.textContent+'\\n$$';code.parentElement.replaceWith(math);});%s</script>",
+        backend == KATEX ? "renderMathInElement(document.body);" :
+                          "if(window.MathJax?.Hub)MathJax.Hub.Queue(['Typeset',MathJax.Hub]);");
       break;
   }
 

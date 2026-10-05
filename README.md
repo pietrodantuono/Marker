@@ -54,6 +54,24 @@ Marker is a Markdown editor for Linux made with GTK 4 and libadwaita.
 * [![Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-black.svg)](https://snapcraft.io/marker)
 
 
+## Rich elements in Formatted Markdown
+
+Formatted Markdown shows images, equations, Markdown tables, gnuplot charts and
+Mermaid diagrams within the writing page. Click an element or its **Source**
+button to edit the original Markdown in place; **Render** switches back. Inline
+images and equations reveal their containing paragraph. Keyboard navigation and
+selection into a rendered region also expose its source.
+
+Enable mathematics, Mermaid and gnuplot in Preview preferences as needed. Notebook
+styles apply to the rendered elements, and linked gnuplot data changes refresh them.
+Unavailable images or failed plots keep editable source with a retry control.
+Saving, undo and exports use the original Markdown buffer.
+
+Complex list/quote nesting retains source presentation. Inline snapshots have a
+64 MiB readback budget; oversized documents fall back to source and remain viewable
+in the regular preview. Interactive plot controls and links use the regular preview;
+the inline surface opens source for editing.
+
 ## Install this checkout
 
 These instructions install the current GTK 4/Folio redesign from your local

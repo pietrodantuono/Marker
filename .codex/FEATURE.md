@@ -119,11 +119,34 @@ project workflows.
   surface, preview, formatting toolbar and all five view modes.
 - MarkerSourceView caches the shared structure/formatted spans; native heading
   gutter and live outline reuse that structure and one undoable heading operation.
+- MarkerRichView owns ephemeral rich-region presentation over that same buffer:
+  one lazy offscreen preview, bounded textures, scrolling overlays and source marks.
+  A formatted-only number gutter omits rendered ranges; source mode remains native.
 - SciDown renders scientific HTML/LaTeX. One render-style helper supplies preview,
   HTML and WebKit print/PDF; scientific readiness includes gnuplot/diagram/font work.
 - GTK4 >=4.18, Libadwaita >=1.7, GtkSourceView5 >=5.14, WebKitGTK6 >=2.50.
 
 ## Acceptance criteria and definition of done
+
+### Inline rich elements in Formatted Markdown (follow-up)
+
+- Images, mathematical expressions, Markdown tables and scientific fences render
+  in the writing page by default. Inline images/math retain their surrounding
+  paragraph; clicking its rendered region exposes that paragraph's source.
+- Click or activate Source to edit the original region in the existing editor;
+  Render switches back. Keyboard navigation/search into a region exposes source.
+- The GtkSourceBuffer remains authoritative. Presentation must not insert object
+  characters, rewrite source, change dirty state, or create a separate undo history.
+- Use the existing scientific renderer and effective notebook/global styles.
+  Refresh after edits, notebook CSS changes and linked gnuplot data changes.
+- Failed/unavailable/oversized rendering leaves readable, editable source and a
+  local explanation/retry control. Other regions remain usable.
+- Rendered regions are visual snapshots; links and interactive chart controls use
+  the regular preview. Complex list/quote nesting keeps source presentation until
+  representative documents establish safe rendering boundaries.
+- Preserve headings/gutters, outline, search, selection, exports and all view modes.
+- Exercise source fidelity, undo, Unicode, incomplete syntax, stale asynchronous
+  results, teardown, light/dark and responsive writing measures with real GTK/WebKit.
 
 - All requirements above work in light/dark and wide/medium/narrow states.
 - Fresh defaults and persisted explicit choices are exercised in isolated profiles.

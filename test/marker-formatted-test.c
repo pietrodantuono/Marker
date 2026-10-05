@@ -143,6 +143,42 @@ test_list_structure (void)
   g_assert_false (has_span (spans, MARKER_SPAN_MARKER, markdown, "1. "));
 }
 
+static void
+test_rich_regions (void)
+{
+  const char *markdown = "# Héllo\n\nBefore ![plot](data/chart.svg) after.\n\n"
+    "Inline $x^2$ and `![literal](x)`\n\n"
+    "| A | B |\n| --- | ---: |\n| 1 | 2 |\n\n"
+    "```gnuplot\nplot sin(x)\n```\n\n"
+    "```c\n![hidden](x) $literal$\n```\n\n"
+    "- Nested ![asset](x)\n\n"
+    "`$literal$`\n\n"
+    "Final ![ref][figure]\n\n[figure]: data/chart.svg\n";
+  g_autoptr (MarkerMarkdownStructure) structure = marker_markdown_structure_parse (markdown);
+  g_autoptr (GArray) ranges = marker_markdown_structure_rich_ranges (markdown, structure);
+  g_assert_cmpuint (ranges->len, ==, 5);
+  guint previous = 0;
+  for (guint i = 0; i < ranges->len; i++)
+    {
+      MarkerRichRange range = g_array_index (ranges, MarkerRichRange, i);
+      g_assert_cmpuint (range.start, >=, previous);
+      g_assert_cmpuint (range.end, >, range.start);
+      previous = range.end;
+    }
+  g_autofree char *annotated = marker_markdown_structure_rich_source (markdown, ranges, "test");
+  g_assert_nonnull (strstr (annotated, "id=\"test-start-0\"") );
+  g_assert_nonnull (strstr (annotated, "Before ![plot](data/chart.svg) after."));
+  g_assert_nonnull (strstr (annotated, "[figure]: data/chart.svg"));
+  const char *incomplete = "```gnuplot\nplot sin(x)\n";
+  g_autoptr (MarkerMarkdownStructure) unfinished = marker_markdown_structure_parse (incomplete);
+  g_autoptr (GArray) raw = marker_markdown_structure_rich_ranges (incomplete, unfinished);
+  g_assert_cmpuint (raw->len, ==, 0);
+  const char *extra = "| One |\n| --- |\n| Value |\n\n$$\n\nx^2\n\n$$\n\n<img src='figure.svg'/>";
+  g_autoptr (MarkerMarkdownStructure) extra_structure = marker_markdown_structure_parse (extra);
+  g_autoptr (GArray) extra_ranges = marker_markdown_structure_rich_ranges (extra, extra_structure);
+  g_assert_cmpuint (extra_ranges->len, ==, 3);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -155,5 +191,6 @@ main (int argc, char **argv)
   g_test_add_func ("/formatted/cursor-anchor", test_cursor_anchor);
   g_test_add_func ("/formatted/inline-code", test_inline_code);
   g_test_add_func ("/formatted/list-structure", test_list_structure);
+  g_test_add_func ("/formatted/rich-regions", test_rich_regions);
   return g_test_run ();
 }

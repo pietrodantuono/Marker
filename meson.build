@@ -48,8 +48,10 @@ marker_sources = [
   'src/marker-page-sidebar.c',
   'src/marker-session.c',
   'src/marker-formatted.c',
+  'src/marker-rich-view.c',
   'src/marker-markdown-structure.c',
   'src/marker-heading-gutter.c',
+  'src/marker-line-gutter.c',
   'src/marker-outline.c',
   res
 ]

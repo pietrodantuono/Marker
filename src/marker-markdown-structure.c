@@ -220,3 +220,143 @@ marker_markdown_structure_cursor_source (const char *markdown, guint cursor)
   g_autofree char *before = g_strndup (markdown, point - markdown);
   return g_strconcat (before, "<div id=\"cursor_pos\"></div>\n\n", point, NULL);
 }
+
+static gint
+compare_rich_ranges (gconstpointer a, gconstpointer b)
+{
+  const MarkerRichRange *left = a, *right = b;
+  return left->start < right->start ? -1 : left->start > right->start;
+}
+
+GArray *
+marker_markdown_structure_rich_ranges (const char *markdown,
+                                     const MarkerMarkdownStructure *structure)
+{
+  GArray *ranges = g_array_new (FALSE, FALSE, sizeof (MarkerRichRange));
+  /* Detect content, not HTML structure. Actual rendering remains SciDown's job.
+   * Code spans are the first alternative so dollar signs/images in code stay raw. */
+  g_autoptr (GRegex) rich = g_regex_new (
+    "(`+)[^`]*\\1|(?i:<img\\b[^>]*>)|!\\[[^\\]\\n]*\\](?:\\([^\\n]+\\)|\\[[^\\]\\n]*\\])|"
+    "(?<![\\\\$])\\$\\$[\\s\\S]+?\\$\\$|(?<![\\\\$])\\$[^$\\n]+\\$|"
+    "\\\\\\([\\s\\S]+?\\\\\\)|\\\\\\[[\\s\\S]+?\\\\\\]",
+    G_REGEX_OPTIMIZE, 0, NULL);
+  g_autoptr (GRegex) separator = g_regex_new (
+    "^[^\\n]*\\|[^\\n]*\\n[ \\t]*\\|?[ \\t]*:?-{3,}:?[ \\t]*(?:\\|[ \\t]*:?-{3,}:?[ \\t]*)*\\|?[ \\t]*$",
+    G_REGEX_MULTILINE | G_REGEX_OPTIMIZE, 0, NULL);
+
+  for (guint i = 0; i < structure->blocks->len; i++)
+    {
+      const MarkerBlock *block = &g_array_index (structure->blocks, MarkerBlock, i);
+      if (block->kind == MARKER_BLOCK_SCIENCE && block->closed)
+        {
+          MarkerRichRange range = { block->start, block->end };
+          g_array_append_val (ranges, range);
+        }
+    }
+
+  /* Paragraph boundaries preserve inline image/math placement and table rows.
+   * Protected code/frontmatter and list/quote nesting are left to source editing. */
+  const char *line = markdown, *paragraph = NULL;
+  guint paragraph_start = 0, offset = 0;
+  gboolean nested = FALSE, display_math = FALSE;
+  guint block_index = 0;
+  while (TRUE)
+    {
+      const char *end = strchr (line, '\n');
+      if (end == NULL)
+        end = line + strlen (line);
+      const char *content = line;
+      while (content < end && g_ascii_isspace (*content))
+        content++;
+      gboolean protected = FALSE;
+      while (block_index < structure->blocks->len &&
+             offset > g_array_index (structure->blocks, MarkerBlock, block_index).end)
+        block_index++;
+      if (block_index < structure->blocks->len)
+        {
+          const MarkerBlock *block = &g_array_index (structure->blocks, MarkerBlock, block_index);
+          protected = offset >= block->start && offset <= block->end;
+        }
+      gboolean boundary = (content == end && !display_math) || protected || *line == '\0';
+      if (paragraph != NULL && boundary)
+        {
+          g_autofree char *text = g_strndup (paragraph, line - paragraph);
+          g_autoptr (GMatchInfo) match = NULL;
+          gboolean render = g_regex_match (separator, text, 0, NULL);
+          g_regex_match (rich, text, 0, &match);
+          while (!render && g_match_info_matches (match))
+            {
+              int start;
+              g_match_info_fetch_pos (match, 0, &start, NULL);
+              render = text[start] != '`';
+              g_match_info_next (match, NULL);
+            }
+          if (render && !nested)
+            {
+              guint stop = offset;
+              while (stop > paragraph_start && g_utf8_offset_to_pointer (markdown, stop)[-1] == '\n')
+                stop--;
+              MarkerRichRange range = { paragraph_start, stop };
+              g_array_append_val (ranges, range);
+            }
+          paragraph = NULL;
+          display_math = FALSE;
+        }
+      if (!boundary)
+        {
+          if (paragraph == NULL)
+            {
+              paragraph = line;
+              paragraph_start = offset;
+              nested = FALSE;
+            }
+          nested |= *content == '>' || (content + 1 < end && strchr ("-*+", *content) != NULL && g_ascii_isspace (content[1]));
+          const char *digits = content;
+          while (digits < end && g_ascii_isdigit (*digits)) digits++;
+          nested |= digits > content && digits + 1 < end && strchr (".)", *digits) != NULL && g_ascii_isspace (digits[1]);
+          gboolean code = FALSE;
+          for (const char *p = line; p < end; p++)
+            {
+              if (*p == '`') code = !code;
+              if (!code && *p == '$' && p + 1 < end && p[1] == '$' && (p == line || p[-1] != '\\'))
+                { display_math = !display_math; p++; }
+            }
+        }
+      if (*end == '\0')
+        {
+          if (paragraph != NULL)
+            {
+              /* Process the final paragraph through the same boundary branch. */
+              offset += g_utf8_pointer_to_offset (line, end);
+              line = end;
+              continue;
+            }
+          break;
+        }
+      offset += g_utf8_pointer_to_offset (line, end) + 1;
+      line = end + 1;
+    }
+  g_array_sort (ranges, compare_rich_ranges);
+  return ranges;
+}
+
+char *
+marker_markdown_structure_rich_source (const char *markdown, const GArray *ranges,
+                                      const char *token)
+{
+  GString *copy = g_string_new (NULL);
+  const char *previous = markdown;
+  for (guint i = 0; i < ranges->len; i++)
+    {
+      const MarkerRichRange *range = &g_array_index (ranges, MarkerRichRange, i);
+      const char *start = g_utf8_offset_to_pointer (markdown, range->start);
+      const char *end = g_utf8_offset_to_pointer (markdown, range->end);
+      g_string_append_len (copy, previous, start - previous);
+      g_string_append_printf (copy, "\n\n<div id=\"%s-start-%u\"></div>\n\n", token, i);
+      g_string_append_len (copy, start, end - start);
+      g_string_append_printf (copy, "\n\n<div id=\"%s-end-%u\"></div>\n\n", token, i);
+      previous = end;
+    }
+  g_string_append (copy, previous);
+  return g_string_free (copy, FALSE);
+}

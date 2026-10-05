@@ -1,9 +1,9 @@
 # Current status
 
-Current phase: Complete — installation and commit handoff.
-Current task: None.
-Last completed task: Feature committed as 6c51fe11, with SciDown 995fba6 and Charter 35e95a1; final handoff notes reconciled.
-Next task: Install the already-built local Flatpak using README; optional desktop integration/Debian CI follow-up below.
+Current phase: Phase 6 complete — inline rich elements in Formatted Markdown.
+Current task: None; implementation and local installation complete.
+Last completed task: Final optimized package reinstalled; 11/11 suites pass, final diff/lifecycle review and tracking handoff complete.
+Next task: Save and restart an already-running app to load the installed build; use the documented desktop-integration follow-up if needed.
 
 # Completed
 
@@ -65,13 +65,31 @@ Next task: Install the already-built local Flatpak using README; optional deskto
   and Charter 35e95a1 are on their feature/folio-renderer branches. Final tracking
   notes are a separate documentation commit; no push performed. The built ignored
   build-flatpak-repo is retained for immediate user installation.
+- Phase 6: rendered image/math/table/gnuplot/Mermaid regions with click/Source/Render,
+  original-buffer edit/undo/save, lazy shared rendering, bounded HiDPI textures,
+  stale-result cancellation and editable failure/retry surfaces. Formatted numbers
+  omit compressed ranges. Shared math fences and notebook-relative draft assets work
+  in normal previews too. Three synthetic captures reviewed; final optimized package
+  rebuilt and reinstalled into the user's existing app. This follow-up is uncommitted.
 
 # In progress
 
-None. Implementation, installation documentation and commit handoff are complete.
-Only the explicit optional validation deferrals in TASKS remain.
+- None. Follow-up requested 2026-10-05 is implemented; explicit remaining deferrals
+  are listed in TASKS and the final handoff.
 
 # Discovered issues
+
+- GTK's overlay child lives in its internal text-window container; the public
+  TextView.remove handles anchored/direct children. Use one zero-measure owning
+  layer, normal child disposal, and retain its empty shell until SourceView dies.
+- requestAnimationFrame is suspended for offscreen WebKit. Use readiness promises,
+  image completion and a queued task before measuring instead of waiting for frames.
+- Native line numbers overlap compressed source lines. A formatted-only number
+  gutter omits rendered source ranges and restores numbers on Source; the ordinary
+  source-mode gutter remains unchanged. Three initial captures exposed this issue.
+
+- The host/SDK lack Xvfb. An unprivileged task-only executable supplied isolated
+  display :93 for actual GTK/WebKit checks; the server was stopped after validation.
 
 - Actual Flatpak build found libspelling in /app/lib64 while the next module's
   dependency lookup uses /app/lib. Set the manifest's Meson libdir consistently
@@ -108,6 +126,19 @@ Only the explicit optional validation deferrals in TASKS remain.
   Swiss is enabled by default and overrides the preview's base font.
 
 # Validation performed
+
+- Phase 6: Unicode/protected/incomplete/one-column-table/multiline-math discovery;
+  real image/math/table/gnuplot/Mermaid output; Source/Render, native edit/undo,
+  selection, exact save bytes, light/dark/narrow sizes, mode changes and teardown.
+  Missing image/invalid plot recovery, math fences, notebook CSS and CSV monitors,
+  actual HTML/PDF export with no inline UI annotations pass. All 11 suites pass
+  in the final run on task-owned :93 (window workflows 44.60s); only isolated SDK
+  bus notices, no GTK criticals or C compiler warnings. Rich editing also passes at
+  2x display scale. Actual image click and unsaved notebook relative assets pass.
+  JavaScript syntax, strict schemas, resource dependencies and diff checks pass.
+  Final light/dark/narrow captures are rich-light.png, rich-dark.png, rich-narrow.png.
+  The optimized Flatpak rebuilt successfully and was reinstalled in the user's
+  existing installation. No live user documents were touched or app process closed.
 
 - Installation handoff: GNOME 50 local Flatpak builds/exports successfully with
   /app/libspelling and generated source exclusions. Installed into a task-owned
@@ -167,7 +198,7 @@ Only the explicit optional validation deferrals in TASKS remain.
 - Exported HTML retains local stylesheet/asset dependencies; portability bundling
   and CSS parity for non-web export formats are outside this feature's scope.
 
-# Final handoff
+# Previous handoff (phases 0–5)
 
 ## Implemented
 
@@ -239,3 +270,70 @@ checks, then build Debian release artifacts in CI. Publish the local renderer
 commits to reachable remotes before sharing the parent branch with another machine;
 the parent alone cannot supply new submodule objects. Reuse these five documents for any follow-up;
 do not rebuild another parallel plan or restore inherited files over this work.
+
+# Final handoff
+
+## Implemented
+
+The inline-rich follow-up is complete. Formatted Markdown renders top-level images,
+math, tables, gnuplot charts and Mermaid diagrams in the writing page. Click or
+Source exposes the original region; Render switches back. Caret/selection/search
+reveal source, native edit/undo/save remain authoritative, and failures provide
+editable source with local explanation/retry. Preferences, notebook CSS and linked
+CSV changes refresh output. Normal preview/export also support math fences, and
+unsaved notebook drafts resolve relative assets against their notebook root.
+README documents use and limits. The optimized Flatpak is rebuilt and installed
+in the user's existing local installation. This follow-up has no commits or pushes.
+
+## Important architectural decisions
+
+Retain GtkSourceBuffer and existing heading/protected-block discovery. MarkerRichView
+owns only ephemeral presentation: one lazy offscreen MarkerPreview, one scrolling
+zero-measure GTK layer, marked source ranges and generation-checked snapshots.
+No child anchors, projection buffer, duplicate undo model or per-region WebKit.
+Readback is bounded at 64 MiB and scales with HiDPI. A formatted-only number gutter
+omits compressed source ranges; source mode uses its ordinary gutter. Original
+Markdown supplies exports, keeping rendering UI out of saved/exported documents.
+
+## Validation performed
+
+Final GNOME 50 SDK build and all 11 Meson suites pass, including 14 real window
+workflows (44.60s). No C compiler warnings or GTK criticals; isolated SDK bus
+connection notices remain. Pure tests cover Unicode, protected/incomplete markup,
+references, one-column tables and multiline math. Real GTK/WebKit checks cover
+image click, Source/Render, editing/undo/exact save bytes, selection, view changes,
+scrolling, light/dark/narrow and 2x scale, failure/recovery, lazy renderer lifetime,
+stale callbacks/close, live notebook CSS/CSV, unsaved draft assets and actual
+HTML/PDF output. Synthetic application captures rich-light.png, rich-dark.png and
+rich-narrow.png were reviewed in two bounded rounds; overlapping line numbers were
+corrected. Strict schemas, resources, JavaScript, manifest and diff checks pass.
+Optimized Flatpak build has no compiler warning/error findings and reinstall
+succeeds. Task-owned Xvfb is stopped; tests never wrote into user notebooks.
+
+## Known limitations
+
+Inline regions are visual snapshots. Inline math/images edit their whole paragraph;
+links and chart interactions use regular preview. Complex list/quote nesting keeps
+source presentation. Oversized documents fall back to source and remain available
+in regular preview. Mathematics/gnuplot/Mermaid need their existing Preview
+preferences enabled. Existing local-asset export portability and host native-build
+version constraints remain as documented in README and the previous handoff.
+
+## Deferred work
+
+- Nested rich-region conformance and interactive inline web content: guessing
+  nested boundaries risks source structure; snapshots intentionally open source.
+  Impact and next steps are recorded in TASKS. Add real-document regressions before
+  extending discovery; assess interactive widgets against an actual workflow.
+- The previous desktop chooser/Files/physical-printer and Debian package checks
+  remain explicitly deferred for their required environments. Backend file/save,
+  responsive UI and actual HTML/PDF behavior are exercised here.
+
+## Recommended follow-up
+
+Save any running documents, close Marker, then launch the installed build with
+`flatpak run --user com.github.fabiocolacio.marker`. Use Formatted Markdown and click
+a rendered region or Source to edit; Render restores its output. Review the README
+usage section and test representative scientific notebooks, especially unusually
+nested markup. Keep these five tracking files as the implementation source of
+truth. Review and commit this follow-up separately when requested; no push occurred.

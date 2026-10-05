@@ -11,6 +11,7 @@
 
 #include "marker-formatted.h"
 #include "marker-prefs.h"
+#include "marker-rich-view.h"
 
 struct _MarkerEditor
 {
@@ -18,6 +19,7 @@ struct _MarkerEditor
 
   MarkerSourceView *source_view;
   MarkerPreview *preview;
+  MarkerRichView *rich_view;
   GtkWidget *source_scroller;
   GtkWidget *content;
   GtkWidget *format_bar;
@@ -298,8 +300,11 @@ static void
 preview_source_block_cb (GtkButton    *button,
                          MarkerEditor *self)
 {
-  marker_editor_set_view_mode (self, DUAL_PANE_MODE);
-  marker_editor_scroll_preview_to_cursor (self);
+  if (!marker_rich_view_toggle_at_cursor (self->rich_view))
+    {
+      marker_editor_set_view_mode (self, DUAL_PANE_MODE);
+      marker_editor_scroll_preview_to_cursor (self);
+    }
 }
 
 static GtkWidget *
@@ -349,7 +354,7 @@ create_format_bar (MarkerEditor *self)
 
   gtk_widget_set_hexpand (spacer, TRUE);
   gtk_box_append (GTK_BOX (bar), spacer);
-  preview_button = icon_button ("view-reveal-symbolic", "Preview block at the cursor");
+  preview_button = icon_button ("view-reveal-symbolic", "Render / Source at the cursor");
   gtk_widget_add_css_class (preview_button, "marker-preview-action");
   g_signal_connect (preview_button, "clicked", G_CALLBACK (preview_source_block_cb), self);
   gtk_box_append (GTK_BOX (bar), preview_button);
@@ -415,6 +420,7 @@ marker_editor_update_layout (MarkerEditor *self)
     }
 
   marker_source_view_set_formatted (self->source_view, self->view_mode == FORMATTED_MODE);
+  marker_rich_view_set_enabled (self->rich_view, self->view_mode == FORMATTED_MODE);
   gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (self->source_view),
     self->view_mode == FORMATTED_MODE || marker_prefs_get_wrap_text () ? GTK_WRAP_WORD_CHAR : GTK_WRAP_NONE);
   gtk_widget_set_visible (self->format_bar,
@@ -479,6 +485,9 @@ marker_editor_dispose (GObject *object)
   if (self->project != NULL)
     g_signal_handlers_disconnect_by_data (self->project, self);
   g_clear_object (&self->project);
+  if (self->rich_view != NULL)
+    g_object_run_dispose (G_OBJECT (self->rich_view));
+  g_clear_object (&self->rich_view);
   g_clear_object (&self->preview);
   g_clear_object (&self->source_scroller);
   G_OBJECT_CLASS (marker_editor_parent_class)->dispose (object);
@@ -506,6 +515,7 @@ marker_editor_init (MarkerEditor *self)
   gtk_orientable_set_orientation (GTK_ORIENTABLE (self), GTK_ORIENTATION_VERTICAL);
   self->view_mode = marker_prefs_get_default_view_mode ();
   self->source_view = marker_source_view_new ();
+  self->rich_view = marker_rich_view_new (self->source_view);
   self->preview = g_object_ref_sink (marker_preview_new ());
   self->source_scroller = g_object_ref_sink (gtk_scrolled_window_new ());
   self->content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
@@ -560,6 +570,7 @@ marker_editor_refresh_preview (MarkerEditor *self)
   g_autofree char *notebook = self->project != NULL ? g_file_get_path (marker_project_get_root (self->project)) : NULL;
   marker_preview_render_markdown (self->preview, markdown, stylesheet, path, notebook,
                                   marker_source_view_get_cursor_position (self->source_view));
+  marker_rich_view_refresh (self->rich_view, stylesheet, path, notebook);
 }
 
 MarkerViewMode

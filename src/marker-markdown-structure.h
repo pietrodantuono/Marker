@@ -38,6 +38,14 @@ void marker_markdown_structure_free (MarkerMarkdownStructure *structure);
 const MarkerHeading *marker_markdown_structure_heading_at_line (const MarkerMarkdownStructure *structure, guint line);
 char *marker_markdown_structure_cursor_source (const char *markdown, guint cursor);
 
+/* Whole source regions suitable for non-destructive inline render overlays. */
+typedef struct { guint start, end; } MarkerRichRange;
+GArray *marker_markdown_structure_rich_ranges (const char *markdown,
+                                              const MarkerMarkdownStructure *structure);
+char *marker_markdown_structure_rich_source (const char *markdown,
+                                            const GArray *ranges,
+                                            const char *token);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (MarkerMarkdownStructure, marker_markdown_structure_free)
 G_END_DECLS
 #endif

@@ -873,7 +873,9 @@ marker_preview_render_markdown(MarkerPreview* preview,
                                        notebook_folder,
                                        -1);
 
-  marker_preview_load_html (preview, html, base_uri, FALSE);
+  g_autofree char *render_path = base_uri != NULL ? g_strdup (base_uri)
+    : g_build_filename (base_folder, ".marker-preview.html", NULL);
+  marker_preview_load_html (preview, html, render_path, FALSE);
   free(html);
 }
 

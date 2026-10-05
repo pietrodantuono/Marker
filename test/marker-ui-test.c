@@ -14,6 +14,7 @@
 #include <glib/gstdio.h>
 
 static char *fixture;
+static void capture_window (MarkerWindow *window, const char *name);
 
 typedef struct { GMainLoop *loop; JSCValue *value; GError *error; } ScriptResult;
 
@@ -450,6 +451,306 @@ test_document_surface (void)
   settle ();
 }
 
+static GtkWidget *
+rich_region_recursive (GtkWidget *widget, guint *index)
+{
+  if (gtk_widget_has_css_class (widget, "marker-rich-region") && (*index)-- == 0)
+    return widget;
+  for (GtkWidget *child = gtk_widget_get_first_child (widget); child != NULL;
+       child = gtk_widget_get_next_sibling (child))
+    {
+      GtkWidget *found = rich_region_recursive (child, index);
+      if (found != NULL) return found;
+    }
+  return NULL;
+}
+
+static GtkWidget *
+rich_region (MarkerSourceView *source, guint index)
+{
+  return rich_region_recursive (GTK_WIDGET (source), &index);
+}
+
+static void
+wait_rich_pictures (MarkerSourceView *source, guint count)
+{
+  gint64 deadline = g_get_monotonic_time () + 20 * G_TIME_SPAN_SECOND;
+  gboolean ready;
+  do
+    {
+      while (g_main_context_iteration (NULL, FALSE));
+      ready = TRUE;
+      for (guint i = 0; i < count; i++)
+        {
+          GtkWidget *region = rich_region (source, i);
+          GtkWidget *picture = region != NULL ? find_widget (region, GTK_TYPE_PICTURE) : NULL;
+          ready &= picture != NULL && gtk_picture_get_paintable (GTK_PICTURE (picture)) != NULL;
+        }
+      if (ready) break;
+      g_usleep (1000);
+    } while (g_get_monotonic_time () < deadline);
+  if (!ready)
+    for (guint i = 0; i < count; i++)
+      {
+        GtkWidget *region = rich_region (source, i);
+        g_test_message ("Rich region %u: %s", i, region != NULL ? "present" : "missing");
+        if (region != NULL)
+          {
+            for (GtkWidget *child = gtk_widget_get_first_child (region); child != NULL;
+                 child = gtk_widget_get_next_sibling (child))
+              if (GTK_IS_LABEL (child)) g_test_message ("Region message: %s", gtk_label_get_text (GTK_LABEL (child)));
+          }
+      }
+  g_assert_true (ready);
+}
+
+static void
+test_rich_editing (void)
+{
+  g_settings_set_boolean (prefs.preview_settings, "mathjs-toggle", TRUE);
+  g_settings_set_boolean (prefs.preview_settings, "mermaid-toggle", TRUE);
+  g_settings_set_boolean (prefs.preview_settings, "gnuplot-toggle", TRUE);
+  g_settings_set_boolean (prefs.preview_settings, "css-toggle", FALSE);
+  marker_prefs_set_use_dark_theme (FALSE);
+  g_autofree char *path = g_build_filename (fixture, "rich.md", NULL);
+  g_autofree char *image = g_build_filename (fixture, "data", "inline-image.svg", NULL);
+  g_file_set_contents (image,
+    "<svg xmlns='http://www.w3.org/2000/svg' width='300' height='100'><rect width='300' height='100' rx='8' fill='#d8e9fa'/><path d='M20 80L90 30L160 55L240 15L280 35' fill='none' stroke='#1c71d8' stroke-width='4'/></svg>", -1, NULL);
+  const char *markdown = "# Rich elements\n\n![Héllo](data/inline-image.svg)\n\n"
+    "Inline $x^2$ stays with its paragraph.\n\n"
+    "| Name | Value |\n| --- | ---: |\n| A | 12 |\n\n"
+    "```gnuplot\nset samples 20\nplot sin(x)\n```\n\n"
+    "```mermaid\ngraph TD\n A --> B\n```\n\nEnd.\n";
+  g_assert_true (g_file_set_contents (path, markdown, -1, NULL));
+  g_autoptr (GFile) file = g_file_new_for_path (path);
+  MarkerWindow *window = new_window ();
+  marker_window_new_editor_from_file (window, file);
+  MarkerEditor *editor = marker_window_get_active_editor (window);
+  marker_editor_set_view_mode (editor, FORMATTED_MODE);
+  MarkerSourceView *source = marker_editor_get_source_view (editor);
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER (marker_editor_get_buffer (editor));
+  wait_rich_pictures (source, 5);
+  settle ();
+  g_assert_false (marker_editor_has_unsaved_changes (editor));
+  g_autofree char *original = marker_source_view_get_text (source);
+  g_assert_cmpstr (original, ==, markdown);
+  MarkerPreview *renderer = MARKER_PREVIEW (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
+  assert_script (renderer, "!!document.querySelector('.katex') && !!document.querySelector('table') && "
+    "!!document.querySelector('.gnuplot-preview svg') && !!document.querySelector('.mermaid svg') && "
+    "document.querySelector('img').naturalWidth > 0");
+  for (guint i = 0; i < 5; i++)
+    {
+      GtkWidget *region = rich_region (source, i);
+      GtkWidget *picture = find_widget (region, GTK_TYPE_PICTURE);
+      g_assert_true (gtk_widget_get_visible (picture));
+      g_assert_cmpint (gtk_widget_get_height (picture), >, 0);
+    }
+  capture_window (window, "rich-light");
+  GtkWidget *region = rich_region (source, 0);
+  GtkWidget *picture = find_widget (region, GTK_TYPE_PICTURE);
+  g_autoptr (GListModel) controllers = gtk_widget_observe_controllers (picture);
+  for (guint i = 0; i < g_list_model_get_n_items (controllers); i++)
+    {
+      g_autoptr (GtkEventController) controller = g_list_model_get_item (controllers, i);
+      if (GTK_IS_GESTURE_CLICK (controller)) g_signal_emit_by_name (controller, "released", 1, 0.0, 0.0);
+    }
+  g_assert_nonnull (find_button (region, "Render"));
+  g_signal_emit_by_name (find_button (region, "Render"), "clicked");
+  settle ();
+  GtkWidget *button = find_button (region, "Source");
+  g_assert_nonnull (button);
+  g_signal_emit_by_name (button, "clicked");
+  settle ();
+  g_assert_nonnull (find_button (rich_region (source, 0), "Render"));
+  g_assert_false (gtk_widget_get_visible (find_widget (rich_region (source, 0), GTK_TYPE_PICTURE)));
+  GtkTextIter iter;
+  guint offset = g_utf8_pointer_to_offset (markdown, strstr (markdown, "Héllo"));
+  gtk_text_buffer_get_iter_at_offset (buffer, &iter, offset);
+  gtk_text_buffer_begin_user_action (buffer);
+  gtk_text_buffer_insert (buffer, &iter, "New ", -1);
+  gtk_text_buffer_end_user_action (buffer);
+  settle ();
+  gtk_text_buffer_undo (buffer);
+  settle ();
+  g_autofree char *restored = marker_source_view_get_text (source);
+  g_assert_cmpstr (restored, ==, markdown);
+  button = find_button (rich_region (source, 0), "Render");
+  g_assert_nonnull (button);
+  g_signal_emit_by_name (button, "clicked");
+  wait_rich_pictures (source, 5);
+  settle ();
+  g_assert_true (gtk_widget_get_visible (find_widget (rich_region (source, 0), GTK_TYPE_PICTURE)));
+  GtkAdjustment *scroll = gtk_scrollable_get_vadjustment (GTK_SCROLLABLE (source));
+  gtk_adjustment_set_value (scroll, gtk_adjustment_get_upper (scroll) - gtk_adjustment_get_page_size (scroll));
+  settle ();
+  graphene_rect_t last_picture;
+  g_assert_true (gtk_widget_compute_bounds (find_widget (rich_region (source, 4), GTK_TYPE_PICTURE), GTK_WIDGET (source), &last_picture));
+  g_assert_cmpfloat (last_picture.origin.y, <, gtk_widget_get_height (GTK_WIDGET (source)));
+  g_assert_cmpfloat (last_picture.origin.y + last_picture.size.height, >, 0);
+  gtk_adjustment_set_value (scroll, 0);
+  marker_prefs_set_use_dark_theme (TRUE);
+  marker_editor_apply_prefs (editor);
+  wait_rich_pictures (source, 5);
+  settle ();
+  capture_window (window, "rich-dark");
+  gtk_window_set_default_size (GTK_WINDOW (window), 500, 800);
+  settle ();
+  wait_rich_pictures (source, 5);
+  settle ();
+  g_assert_cmpint (gtk_widget_get_width (GTK_WIDGET (window)), <, 600);
+  capture_window (window, "rich-narrow");
+  marker_prefs_set_use_dark_theme (FALSE);
+  /* Selecting across hidden source exposes it without object replacement bytes. */
+  GtkTextIter start, end;
+  gtk_text_buffer_get_bounds (buffer, &start, &end);
+  gtk_text_buffer_select_range (buffer, &start, &end);
+  settle ();
+  for (guint i = 0; i < 5; i++)
+    g_assert_nonnull (find_button (rich_region (source, i), "Render"));
+  marker_editor_set_view_mode (editor, EDITOR_ONLY_MODE);
+  g_assert_null (rich_region (source, 0));
+  marker_editor_set_view_mode (editor, FORMATTED_MODE);
+  wait_rich_pictures (source, 5);
+  g_assert_true (marker_editor_save_file (editor));
+  g_autofree char *saved = NULL;
+  g_assert_true (g_file_get_contents (path, &saved, NULL, NULL));
+  g_assert_cmpstr (saved, ==, markdown);
+  /* Exercise pending render cancellation when switching mode/closing. */
+  marker_editor_refresh_preview (editor);
+  marker_editor_set_view_mode (editor, EDITOR_ONLY_MODE);
+  gtk_window_destroy (GTK_WINDOW (window));
+  settle ();
+  g_remove (path);
+  g_remove (image);
+}
+
+static void
+wait_rich_refresh (MarkerSourceView *source, guint index, GdkPaintable *previous)
+{
+  gint64 deadline = g_get_monotonic_time () + 20 * G_TIME_SPAN_SECOND;
+  while (g_get_monotonic_time () < deadline)
+    {
+      while (g_main_context_iteration (NULL, FALSE));
+      GtkWidget *region = rich_region (source, index);
+      GdkPaintable *current = region != NULL ? gtk_picture_get_paintable (
+        GTK_PICTURE (find_widget (region, GTK_TYPE_PICTURE))) : NULL;
+      if (current != NULL && current != previous) return;
+      g_usleep (1000);
+    }
+  g_assert_not_reached ();
+}
+
+static void
+test_rich_failures_refresh (void)
+{
+  g_settings_set_boolean (prefs.preview_settings, "mathjs-toggle", TRUE);
+  g_settings_set_boolean (prefs.preview_settings, "gnuplot-toggle", TRUE);
+  g_settings_set_boolean (prefs.preview_settings, "css-toggle", FALSE);
+  g_autofree char *path = g_build_filename (fixture, "rich-refresh.md", NULL);
+  g_autofree char *image = g_build_filename (fixture, "missing.svg", NULL);
+  g_autofree char *style = g_build_filename (fixture, ".marker.css", NULL);
+  g_autofree char *data = g_build_filename (fixture, "inline.csv", NULL);
+  const char *markdown = "# Refresh\n\n![Asset](missing.svg)\n\n"
+    "```gnuplot\nthis is invalid\n```\n\n"
+    "```math\nx^2 + y^2\n```\n\n"
+    "```gnuplot\nset datafile separator ','\nplot 'inline.csv' using 1:2 with lines\n```\n\nEnd.\n";
+  g_file_set_contents (path, markdown, -1, NULL);
+  g_file_set_contents (data, "0,1\n1,2\n2,3\n", -1, NULL);
+  MarkerWindow *window = new_window ();
+  g_autoptr (GFile) root = fixture_file (NULL);
+  marker_window_add_project (window, root);
+  g_autoptr (GFile) file = g_file_new_for_path (path);
+  marker_window_new_editor_from_file (window, file);
+  MarkerEditor *editor = marker_window_get_active_editor (window);
+  marker_editor_set_view_mode (editor, FORMATTED_MODE);
+  MarkerSourceView *source = marker_editor_get_source_view (editor);
+  gint64 deadline = g_get_monotonic_time () + 20 * G_TIME_SPAN_SECOND;
+  do
+    {
+      settle ();
+      if (rich_region (source, 1) != NULL && find_button (rich_region (source, 0), "Render") != NULL &&
+          find_button (rich_region (source, 1), "Render") != NULL &&
+          rich_region (source, 3) != NULL &&
+          gtk_picture_get_paintable (GTK_PICTURE (find_widget (rich_region (source, 2), GTK_TYPE_PICTURE))) != NULL &&
+          gtk_picture_get_paintable (GTK_PICTURE (find_widget (rich_region (source, 3), GTK_TYPE_PICTURE))) != NULL) break;
+    } while (g_get_monotonic_time () < deadline);
+  g_assert_nonnull (find_button (rich_region (source, 0), "Render"));
+  g_assert_nonnull (find_button (rich_region (source, 1), "Render"));
+  for (guint i = 0; i < 2; i++)
+    g_assert_false (gtk_widget_get_visible (find_widget (rich_region (source, i), GTK_TYPE_PICTURE)));
+  for (guint i = 2; i < 4; i++)
+    g_assert_nonnull (gtk_picture_get_paintable (GTK_PICTURE (find_widget (rich_region (source, i), GTK_TYPE_PICTURE))));
+  g_assert_false (marker_editor_has_unsaved_changes (editor));
+  /* Recover each failed region without losing source or changing other blocks. */
+  g_file_set_contents (image, "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='60'><rect width='120' height='60' fill='#3584e4'/></svg>", -1, NULL);
+  GtkWidget *button = find_button (rich_region (source, 0), "Render");
+  g_signal_emit_by_name (button, "clicked");
+  settle ();
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER (marker_editor_get_buffer (editor));
+  GtkTextIter start, end;
+  guint offset = g_utf8_pointer_to_offset (markdown, strstr (markdown, "this is invalid"));
+  gtk_text_buffer_get_iter_at_offset (buffer, &start, offset);
+  gtk_text_buffer_get_iter_at_offset (buffer, &end, offset + strlen ("this is invalid"));
+  gtk_text_buffer_begin_user_action (buffer);
+  gtk_text_buffer_delete (buffer, &start, &end);
+  gtk_text_buffer_insert (buffer, &start, "plot cos(x)", -1);
+  gtk_text_buffer_end_user_action (buffer);
+  settle ();
+  wait_rich_pictures (source, 4);
+  MarkerPreview *renderer = MARKER_PREVIEW (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
+  assert_script (renderer, "document.querySelector('.marker-math-block .katex') !== null && "
+    "document.querySelectorAll('.gnuplot-preview svg').length === 2 && !document.querySelector('.gnuplot-error')");
+  g_autofree char *edited = marker_source_view_get_text (source);
+  g_assert_nonnull (strstr (edited, "plot cos(x)"));
+  g_autoptr (GdkPaintable) old_style = g_object_ref (gtk_picture_get_paintable (
+    GTK_PICTURE (find_widget (rich_region (source, 3), GTK_TYPE_PICTURE))));
+  /* Notebook stylesheet atomic changes use the same renderer, without typing. */
+  g_file_set_contents (style, "body { color: rgb(12, 34, 56); }", -1, NULL);
+  wait_rich_refresh (source, 3, old_style);
+  wait_rich_pictures (source, 4);
+  assert_script (renderer, "getComputedStyle(document.body).color === 'rgb(12, 34, 56)'");
+  g_autoptr (GdkPaintable) old_plot = g_object_ref (gtk_picture_get_paintable (
+    GTK_PICTURE (find_widget (rich_region (source, 3), GTK_TYPE_PICTURE))));
+  g_file_set_contents (data, "0,3\n1,2\n2,1\n", -1, NULL);
+  wait_rich_refresh (source, 3, old_plot);
+  wait_rich_pictures (source, 4);
+  g_assert_true (old_plot != gtk_picture_get_paintable (GTK_PICTURE (find_widget (rich_region (source, 3), GTK_TYPE_PICTURE))));
+  g_autofree char *after_refresh = marker_source_view_get_text (source);
+  g_assert_cmpstr (after_refresh, ==, edited);
+  g_assert_true (marker_editor_save_file (editor));
+  g_autofree char *html_path = g_build_filename (fixture, "rich-inline.html", NULL);
+  g_autofree char *pdf_path = g_build_filename (fixture, "rich-inline.pdf", NULL);
+  g_assert_true (marker_exporter_export (path, html_path));
+  g_autofree char *html = NULL;
+  g_file_get_contents (html_path, &html, NULL, NULL);
+  g_assert_nonnull (strstr (html, "gnuplot-preview"));
+  g_assert_nonnull (strstr (html, "marker-math-block"));
+  g_assert_null (strstr (html, "markerRichSnapshot"));
+  g_assert_null (strstr (html, "marker-rich-region"));
+  g_assert_true (marker_exporter_export (path, pdf_path));
+  g_autofree char *pdf = NULL;
+  g_file_get_contents (pdf_path, &pdf, NULL, NULL);
+  g_assert_true (g_str_has_prefix (pdf, "%PDF-"));
+  gtk_window_destroy (GTK_WINDOW (window));
+  settle ();
+  /* Unsaved notebook pages resolve assets against their notebook root. */
+  window = new_window ();
+  marker_window_add_project (window, root);
+  marker_window_new_editor (window);
+  editor = marker_window_get_active_editor (window);
+  source = marker_editor_get_source_view (editor);
+  marker_source_view_set_text (source, "![Draft asset](missing.svg)\n", -1);
+  marker_editor_set_view_mode (editor, FORMATTED_MODE);
+  wait_rich_pictures (source, 1);
+  renderer = MARKER_PREVIEW (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
+  assert_script (renderer, "document.querySelector('img').naturalWidth === 120");
+  gtk_window_destroy (GTK_WINDOW (window));
+  settle ();
+  g_file_set_contents (style, "body { color: #123456; }", -1, NULL);
+  g_remove (path); g_remove (image); g_remove (data);
+  g_remove (html_path); g_remove (pdf_path);
+}
+
 static void
 test_notebook_styles (void)
 {
@@ -857,6 +1158,8 @@ main (int argc, char **argv)
   g_test_add_func ("/window/pages-files-search", test_page_files_search);
   g_test_add_func ("/window/default-typography", test_default_typography);
   g_test_add_func ("/window/document-surface", test_document_surface);
+  g_test_add_func ("/window/rich-editing", test_rich_editing);
+  g_test_add_func ("/window/rich-failures-refresh", test_rich_failures_refresh);
   g_test_add_func ("/window/notebook-styles", test_notebook_styles);
   g_test_add_func ("/window/preview-preferences", test_preview_preferences);
   g_test_add_func ("/renderer/charter-append", test_charter_append);

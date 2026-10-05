@@ -164,6 +164,10 @@
   font-weight: 400;
 }
 
+.marker-line-gutter {
+  color: alpha(@view_fg_color, .48);
+}
+
 .marker-empty-state {
   color: alpha(@window_fg_color, .72);
 }

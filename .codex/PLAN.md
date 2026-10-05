@@ -146,6 +146,36 @@ branch. Preserve user data; no format migration, extra launcher or direct push.
 Local submodule commits must be published to reachable repositories before another
 machine can clone the parent feature commit. Full Debian release builds remain deferred.
 
+## Phase 6: inline rich elements (2026-10-05 follow-up)
+
+- Objective: rendered scientific/image/math/table regions inside the existing
+  Formatted Markdown writing page, with in-place source editing.
+- Modules: shared Markdown structure, new rich-region presentation controller,
+  SourceView/Editor integration, existing Preview and GTK regression tests.
+- Changes: discover complete regions using shared protected-block structure;
+  annotate a rendering copy retaining document references/context. One lazy
+  offscreen MarkerPreview renders with existing styles/runtime; bounded snapshots
+  supply native text-view overlays in one zero-measure owning layer. A formatted
+  number gutter omits compressed source lines. Tags reserve space without anchors or source
+  mutation. Source/Render edits original GtkTextBuffer ranges. Cursor/selection
+  reveal source; edits invalidate results and debounce refresh.
+  Shared math-fence normalization also serves normal preview/export. Unsaved notebook
+  drafts use the notebook root for relative assets without creating a backing file.
+- Dependencies: completed phases 0-5 and inspection of this current checkout.
+- Risks: text layout/gutter validity, image completion, texture memory, asynchronous
+  teardown, stale source offsets, complicated nested markup.
+- Migration: none; presentation state ephemeral, persisted Markdown unchanged.
+- Validation: Unicode/protected/incomplete discovery and annotation; real GTK/WebKit
+  images/math/tables/gnuplot, toggle/edit/undo/selection, CSS/data refresh, modes,
+  narrow layouts, scrolling, 2x display scale, disposal, missing-image/invalid-plot
+  recovery, live CSS/CSV and real HTML/PDF export; full build/tests/resource/diff review.
+- Exit: actual rendered output, source/save/undo fidelity, stale-result protection,
+  existing suites pass, screenshots and handoff document validated limitations.
+- Second pass: retain native editor/canonical buffer; no projection buffer or
+  per-element WebKit views; no second heading parser; avoid invisible tags (known
+  annotation issue). Separate discovery/presentation, bound memory and discard
+  async results after edits/teardown. Export consumes canonical source normally.
+
 ## Build and validation commands
 
 Host GTK 4.14.5 headers are installed, below the 4.18 branch minimum; the other
@@ -192,3 +222,10 @@ display when setting up its socket. Verify the resulting window on :92 before
 claiming a headless run. The installation handoff reruns all suites this way.
 Set MARKER_SCREENSHOT_DIR to .codex/screenshots to capture the application-only
 acceptance matrix. No screenshots contain the desktop or real notebook content.
+
+Phase 6 used the same isolated SDK flags on task-owned display :93. The final full
+run passed all 11 suites (window workflows: 44.60s). Repeat the rich-editing workflow
+with GDK_SCALE=2 for texture/display scaling. Rich captures are rich-light.png,
+rich-dark.png and rich-narrow.png. The optimized local Flatpak was rebuilt and
+reinstalled in the user's existing installation; save and restart a running app
+to load it. Test-only Xvfb is stopped after validation.

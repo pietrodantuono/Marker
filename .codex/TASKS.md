@@ -93,8 +93,29 @@ Legend: [ ] not started; [~] in progress; [x] completed; [!] blocked.
 - [x] Validate metadata and relevant tests; inspect staged diffs including renderer changes. Build/tests/metadata pass; staged review/checks pass with generated artifacts excluded.
 - [x] Commit Charter, SciDown and Marker in dependency order: 35e95a1, 995fba6, 6c51fe11. Commit the final handoff notes separately, verify the clean trees and retain the built local Flatpak repository for installation. No push performed.
 
-## Explicit validation deferrals
+## Phase 6: inline rich elements
+
+- [x] Inspect current editor/preview/parser/export/tests/diff; record specification,
+  architecture and second planning pass before production edits.
+- [x] Add Unicode rich-region discovery/annotation using shared protected blocks;
+  cover images, math, tables and closed scientific fences with parser regressions.
+- [x] Implement native source-preserving overlays with one scientific render
+  backend, bounded snapshots and stale-result rejection.
+- [x] Integrate render default, click/Source/Render, cursor/selection reveal, edits,
+  preferences/notebook CSS/data refresh and view switches.
+- [x] Exercise actual renders, editing/undo/save fidelity, missing assets, invalid
+  plots, Unicode, incomplete syntax, stale callbacks, scrolling and disposal.
+- [x] Build/install SDK assets, run suites, inspect warnings/resources, capture
+  light/dark/responsive rich editing states and review ownership/final diff.
+- [x] Validate lazy renderer creation, 2x display scale, filtered formatted line
+  numbers, actual image click, scrolling and unsaved notebook draft assets.
+- [x] Build the optimized Flatpak and reinstall the user's existing local app;
+  preserve running documents and stop the task-owned test display.
+- [x] Reconcile tracking documents and final handoff with tested limitations.
+
+## Previous explicit validation deferrals
 
 - [ ] **Deferred: desktop integration acceptance.** Select/accept native Open/New/Locate/Save As chooser paths, Reveal in Files and a physical print dialog on the user's desktop. Xvfb/SDK has no desktop portal, file manager or printer. Impact: the native integration layer is unverified; captured targets, file creation/save/removal and PDF backend paths are exercised. Next: use a disposable notebook in a GNOME desktop session and exercise those actions, including draft Save As cancellation during removal.
 - [ ] **Deferred: Debian package build/installation.** The host lacks the declared native development versions. Impact: Debian metadata validates, but its package artifact is not claimed tested. The local optimized Flatpak build/install/launch/export are now exercised. Next: build the Debian artifact in CI with the declared versions before publishing.
 - [ ] **Deferred: broader renderer conformance.** The presentation lexer supports the agreed heading/code cases, rather than all CommonMark nesting. Impact: unusual nested list/quote or inline markup may retain source punctuation; source bytes remain authoritative. Next: add representative real documents and regressions before expanding parsing, without introducing another heading model.
+- [ ] **Deferred: nested rich elements and inline interactivity.** Rich snapshots cover complete top-level regions; complex list/quote content keeps editable source. Links and chart interactions remain in regular preview. Impact: those regions do not behave like interactive web content inside the editor. Next: collect real nested documents and add source-fidelity regressions before extending discovery; assess interactive widgets only against an actual user workflow.
