@@ -1,9 +1,9 @@
 # Current status
 
-Current phase: Installation and commit handoff.
-Current task: Commit the reviewed parent feature and record the final handoff.
-Last completed task: Committed Charter and SciDown, including the updated nested pointer, on feature/folio-renderer.
-Next task: Record the parent ID and verify clean trees after committing.
+Current phase: Complete — installation and commit handoff.
+Current task: None.
+Last completed task: Feature committed as 6c51fe11, with SciDown 995fba6 and Charter 35e95a1; final handoff notes reconciled.
+Next task: Install the already-built local Flatpak using README; optional desktop integration/Debian CI follow-up below.
 
 # Completed
 
@@ -61,12 +61,15 @@ Next task: Record the parent ID and verify clean trees after committing.
 - Final staged parent review passes: 130 source/resource/metadata/test/feature-doc
   files, synthetic application captures and the updated SciDown pointer. Generated
   build/cache/package artifacts are excluded. Root and nested diff checks pass.
+- Marker commit 6c51fe11 is on feature/workspace-theme-preferences. SciDown 995fba6
+  and Charter 35e95a1 are on their feature/folio-renderer branches. Final tracking
+  notes are a separate documentation commit; no push performed. The built ignored
+  build-flatpak-repo is retained for immediate user installation.
 
 # In progress
 
-- The user requests committing the current feature and installation instructions.
-  Documentation/package validation is in progress before committing the nested
-  renderer dependencies and parent. Other validation deferrals remain in TASKS.
+None. Implementation, installation documentation and commit handoff are complete.
+Only the explicit optional validation deferrals in TASKS remain.
 
 # Discovered issues
 
@@ -175,7 +178,9 @@ implemented; obsolete verified code is removed. The final Folio reference correc
 uses soft sidebar surfaces, native column dividers and 640px/Monospace 11 defaults
 without resetting explicit choices. Installation instructions are in README;
 the local optimized Flatpak package now builds, installs, launches and exports.
-Only the requested commit handoff is currently pending.
+The feature is committed as 6c51fe11, with nested renderer commits 995fba6/35e95a1.
+Final tracking notes are committed separately; git log -2 identifies both parent
+commits. No changes were pushed.
 
 ## Important architectural decisions
 
@@ -223,6 +228,11 @@ Flatpak/portal integration on a normal desktop.
   regression documents, without introducing a second heading parser.
 
 ## Recommended follow-up
+
+From the repository root, install the ready package with
+`flatpak install --user build-flatpak-repo com.github.fabiocolacio.marker`, then
+`flatpak run --user com.github.fabiocolacio.marker`. README contains prerequisites,
+rebuilding, updating/removing, native requirements and SDK development instructions.
 
 Use a disposable notebook in a GNOME desktop session for the deferred integration
 checks, then build Debian release artifacts in CI. Publish the local renderer

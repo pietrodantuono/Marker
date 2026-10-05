@@ -91,7 +91,7 @@ Legend: [ ] not started; [~] in progress; [x] completed; [!] blocked.
 - [x] Correct Xvfb selection to set host DISPLAY before flatpak run (Flatpak replaces an --env=DISPLAY override); all 11 suites pass on the verified isolated display.
 - [x] Fix UI checks that equate requested width with client allocation under X11 decorations; verify the fresh size before mapping and keep responsive assertions/captures against actual widgets.
 - [x] Validate metadata and relevant tests; inspect staged diffs including renderer changes. Build/tests/metadata pass; staged review/checks pass with generated artifacts excluded.
-- [~] Commit Charter, SciDown and the Marker feature branch in dependency order; verify the final tree and record the handoff. Renderer commits are complete; parent staging/commit remains.
+- [x] Commit Charter, SciDown and Marker in dependency order: 35e95a1, 995fba6, 6c51fe11. Commit the final handoff notes separately, verify the clean trees and retain the built local Flatpak repository for installation. No push performed.
 
 ## Explicit validation deferrals
 
