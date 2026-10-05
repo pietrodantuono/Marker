@@ -12,7 +12,6 @@ STYLES_DIR = join_paths(APP_DIR, 'styles')
 COMMON_DIR = join_paths(APP_DIR, 'common')
 SCRIPTS_DIR = join_paths(APP_DIR, 'scripts')
 HIGHLIGHT_STYLES_DIR = join_paths(join_paths(SCRIPTS_DIR, 'highlight'),'styles')
-WEB_EXTENSIONS_DIRECTORY = join_paths(LIBS_DIR, 'Marker.extensions')
 APPDATA_DIR = join_paths(DATA_DIR, 'metainfo')
 LOCALE_DIR = join_paths(PREFIX, get_option('localedir'))
 
@@ -23,6 +22,7 @@ gnome = import('gnome')
 i18n = import('i18n')
 subdir('help')
 subdir('po')
+subdir('data')
 
 res = gnome.compile_resources(
   'marker_resources',
@@ -31,27 +31,29 @@ res = gnome.compile_resources(
 )
 
 marker_sources = [
-  'src/marker.c',
   'src/marker-editor.c',
   'src/marker-window.c',
   'src/marker-exporter.c',
   'src/marker-markdown.c',
+  'src/marker-render-style.c',
   'src/marker-prefs.c',
   'src/marker-source-view.c',
   'src/marker-preview.c',
-  'src/marker-string.c',
-  'src/marker-widget.c',
-  'src/marker-sketcher-window.c',
-  'src/marker-utils.c',
+  'src/marker-gnuplot.c',
+  'src/marker-workspace.c',
+  'src/marker-project.c',
+  'src/marker-notebook-icon.c',
+  'src/marker-notebook-editor.c',
+  'src/marker-notebook-rail.c',
+  'src/marker-page-sidebar.c',
+  'src/marker-session.c',
+  'src/marker-formatted.c',
+  'src/marker-rich-view.c',
+  'src/marker-markdown-structure.c',
+  'src/marker-heading-gutter.c',
+  'src/marker-line-gutter.c',
+  'src/marker-outline.c',
   res
-]
-
-scroll_extension = [
-  'src/webkit-extension/scroll-extension.c'
-]
-
-click_extension = [
-  'src/webkit-extension/click-extension.c'
 ]
 
 hoedown_sources = [
@@ -78,18 +80,6 @@ hoedown_sources = [
   'src/scidown/src/charter/src/svg_utils.c'
 ]
 
-deps = [
-  dependency('gtk+-3.0', version : '>=3.20'),
-  dependency('glib-2.0'),
-  dependency('gtksourceview-4'),
-  dependency('webkit2gtk-4.1'),
-  dependency('gtkspell3-3.0')
-]
-
-ext_deps =[
-  dependency('webkit2gtk-4.1')
-]
-
 add_global_arguments(
   '-DSTYLES_DIR="@0@/"'.format(STYLES_DIR),
   '-DSCRIPTS_DIR="@0@/"'.format(SCRIPTS_DIR),
@@ -98,26 +88,110 @@ add_global_arguments(
   '-DMARKER_VERSION="@0@"'.format(meson.project_version()),
   '-DLOCALE_DIR="@0@"'.format(LOCALE_DIR),
   '-DCOMMON_DIR="@0@/"'.format(COMMON_DIR),
-  '-DWEB_EXTENSIONS_DIRECTORY="@0@"'.format(WEB_EXTENSIONS_DIRECTORY),
   language : 'c'
 )
 
-shared_library(
-  'scroll-extension',
-  sources : [scroll_extension],
-  dependencies : ext_deps,
-  install : true,
-  link_args: '-lm',
-  install_dir: WEB_EXTENSIONS_DIRECTORY
+glib_dep = dependency('glib-2.0')
+gio_dep = dependency('gio-2.0')
+gtk_dep = dependency('gtk4', version : '>=4.18')
+adw_dep = dependency('libadwaita-1', version : '>=1.7')
+webkit_dep = dependency('webkitgtk-6.0', version : '>=2.50')
+spelling_dep = dependency(
+  'libspelling-1',
+  version : '>=0.4.10',
+  fallback : ['libspelling', 'libspelling_dep']
 )
+
+deps = [
+  gtk_dep,
+  adw_dep,
+  glib_dep,
+  gio_dep,
+  dependency('gtksourceview-5', version : '>=5.14'),
+  webkit_dep,
+  dependency('libsoup-3.0'),
+  spelling_dep
+]
 
 executable(
   EXECUTABLE_NAME,
-  sources : [marker_sources, hoedown_sources],
+  sources : ['src/marker.c', marker_sources, hoedown_sources],
   dependencies : deps,
   link_args: '-lm',
   install : true
 )
+
+gnuplot_test = executable(
+  'marker-gnuplot-test',
+  sources : ['test/marker-gnuplot-test.c', 'src/marker-gnuplot.c'],
+  include_directories : include_directories('src'),
+  dependencies : [glib_dep, gio_dep]
+)
+
+test('gnuplot data file boundary', gnuplot_test)
+
+workspace_test = executable(
+  'marker-workspace-test',
+  sources : ['test/marker-workspace-test.c', 'src/marker-workspace.c', 'src/marker-markdown-structure.c'],
+  include_directories : include_directories('src'),
+  dependencies : [glib_dep, gio_dep]
+)
+
+test('workspace listing', workspace_test)
+
+formatted_test = executable(
+  'marker-formatted-test',
+  sources : ['test/marker-formatted-test.c', 'src/marker-formatted.c', 'src/marker-markdown-structure.c'],
+  include_directories : include_directories('src'),
+  dependencies : [glib_dep, gtk_dep, adw_dep]
+)
+
+test_env = environment()
+test_env.set('GSETTINGS_SCHEMA_DIR', join_paths(meson.current_build_dir(), 'data'))
+test('formatted Markdown', formatted_test, env : test_env)
+
+project_test = executable(
+  'marker-project-test',
+  sources : ['test/marker-project-test.c', 'src/marker-project.c'],
+  include_directories : include_directories('src'),
+  dependencies : [glib_dep, gio_dep],
+  link_args : '-lm'
+)
+
+test('project identity', project_test)
+
+session_test = executable(
+  'marker-session-test',
+  sources : ['test/marker-session-test.c', 'src/marker-session.c', 'src/marker-project.c'],
+  include_directories : include_directories('src'),
+  dependencies : [glib_dep, gio_dep],
+  link_args : '-lm'
+)
+
+test('session persistence', session_test)
+
+notebook_test = executable(
+  'marker-notebook-test',
+  sources : ['test/marker-notebook-test.c', 'src/marker-project.c', 'src/marker-session.c',
+             'src/marker-notebook-icon.c', 'src/marker-notebook-editor.c',
+             'src/marker-notebook-rail.c', res],
+  include_directories : include_directories('src'),
+  dependencies : [gio_dep, gtk_dep, adw_dep],
+  link_args : '-lm'
+)
+test('notebook GTK widgets', notebook_test, env : test_env)
+
+ui_test = executable(
+  'marker-ui-test',
+  sources : ['test/marker-ui-test.c', marker_sources, hoedown_sources],
+  include_directories : include_directories('src'),
+  dependencies : deps,
+  link_args : '-lm'
+)
+ui_env = test_env
+ui_env.set('GSETTINGS_BACKEND', 'memory')
+ui_env.set('GTK_A11Y', 'none')
+test('window workflows', ui_test, env : ui_env, timeout : 60)
 
 install_data(
   'data/com.github.fabiocolacio.marker.svg',

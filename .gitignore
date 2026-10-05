@@ -1,7 +1,11 @@
 build
+/build-*/
+/.flatpak-builder/
 resources.c
 *~
 .vscode
 _build
+/subprojects/*/
+/subprojects/.wraplock
 *.sublime-project
 *.sublime-workspace

@@ -43,9 +43,6 @@ typedef enum{
   MERMAID_LOCAL
 } MarkerMermaidMode;
 
-char                *marker_markdown_css                         (const char         *stylesheet_location);
-char                *marker_markdown_scidown_css                 ();
-
 char                *marker_markdown_to_html                     (const char         *markdown,
                                                                   size_t              size,
                                                                   char               *base_folder,
@@ -53,15 +50,7 @@ char                *marker_markdown_to_html                     (const char    
                                                                   MarkerHighlightMode highlight_mode,
                                                                   MarkerMermaidMode   mermaid_mode,
                                                                   const char         *stylesheet_location,
-                                                                  int                 cursor_position);
-
-char                *marker_markdown_to_html_with_css_inline     (const char         *markdown,
-                                                                  size_t              size,
-                                                                  char               *base_folder,
-                                                                  MarkerMathJSMode     katex_mode,
-                                                                  MarkerHighlightMode highlight_mode,
-                                                                  MarkerMermaidMode   mermaid_mode,
-                                                                  const char         *stylesheet_location,
+                                                                  const char         *notebook_folder,
                                                                   int                 cursor_position);
 
 char                *marker_markdown_to_latex                    (const char         *markdown,
@@ -71,24 +60,6 @@ char                *marker_markdown_to_latex                    (const char    
                                                                   MarkerHighlightMode highlight_mode,
                                                                   MarkerMermaidMode   mermaid_mode,
                                                                   const char         *stylesheet_location);
-
-void                 marker_markdown_to_html_file                (const char         *markdown,
-                                                                  size_t              size,
-                                                                  char               *base_folder,
-                                                                  MarkerMathJSMode     katex_mode,
-                                                                  MarkerHighlightMode highlight_mode,
-                                                                  MarkerMermaidMode   mermaid_mode,
-                                                                  const char         *stylesheet_location,
-                                                                  const char         *filepath);
-
-void                 marker_markdown_to_html_file_with_css_inline(const char         *markdown,
-                                                                  size_t              size,
-                                                                  char               *base_folder,
-                                                                  MarkerMathJSMode     katex_mode,
-                                                                  MarkerHighlightMode highlight_mode,
-                                                                  MarkerMermaidMode   mermaid_mode,
-                                                                  const char         *stylesheet_location,
-                                                                  const char         *filepath);
 
 void                 marker_markdown_to_latex_file               (const char         *markdown,
                                                                   size_t              size,

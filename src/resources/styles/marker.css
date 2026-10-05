@@ -1,0 +1,173 @@
+/* Marker application shell.  Colors follow libadwaita named colors so every
+ * surface changes with the system appearance and high-contrast preference. */
+
+.marker-split {
+  --sidebar-border-color: @borders;
+  --secondary-sidebar-border-color: @borders;
+}
+
+/* Let the native pane draw one divider; opaque children cover its inset edge. */
+.marker-split > .sidebar-pane,
+.marker-split > .sidebar-pane:backdrop {
+  background: @window_bg_color;
+  color: @window_fg_color;
+}
+
+.marker-rail-split > .sidebar-pane,
+.marker-rail-split > .sidebar-pane:backdrop {
+  background: @sidebar_bg_color;
+  color: @sidebar_fg_color;
+}
+
+.marker-topbar,
+.marker-format-bar {
+  background: @view_bg_color;
+  color: @view_fg_color;
+}
+
+.marker-sidebar,
+.marker-outline,
+.marker-project-rail,
+.marker-sidebar headerbar,
+.marker-outline headerbar {
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+}
+
+.marker-project-rail {
+  min-width: 48px;
+  padding: 0;
+}
+
+.marker-project-rail row {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.marker-notebook-row {
+  min-width: 48px;
+  min-height: 50px;
+}
+
+.marker-book {
+  min-width: 26px;
+  min-height: 34px;
+  border-radius: 0 6px 6px 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.marker-notebook-marker {
+  min-width: 2px;
+  min-height: 24px;
+}
+
+.marker-book-preview .marker-book {
+  min-width: 60px;
+  min-height: 78px;
+  border-radius: 0 12px 12px 0;
+  font-size: 20px;
+}
+
+.marker-sidebar {
+  min-width: 240px;
+}
+
+.marker-sidebar list,
+.marker-sidebar listview,
+.marker-project-rail list,
+.marker-project-rail listview {
+  background: transparent;
+}
+
+.marker-sidebar row {
+  border-radius: 8px;
+  margin: 1px 6px;
+}
+
+.marker-page-row {
+  padding: 10px 8px;
+  min-height: 40px;
+}
+
+.marker-page-row button {
+  min-width: 20px;
+  min-height: 20px;
+  padding: 2px;
+}
+
+.marker-page-switch {
+  margin: 5px 8px 8px;
+  font-size: .9em;
+}
+
+.marker-page-switch button {
+  min-height: 22px;
+  padding: 2px 8px;
+}
+
+.marker-rail-header {
+  min-height: 48px;
+}
+
+.marker-rail-header menubutton {
+  padding: 6px;
+}
+
+.marker-sidebar row:selected {
+  background: alpha(@accent_bg_color, .18);
+  color: @window_fg_color;
+}
+
+
+.marker-secondary {
+  color: alpha(currentColor, .62);
+  font-size: .86em;
+}
+
+.marker-dirty {
+  color: @accent_color;
+  font-weight: 700;
+}
+
+.marker-editor-surface {
+  background: @view_bg_color;
+  color: @view_fg_color;
+}
+
+
+.marker-format-bar {
+  border-top: 1px solid @borders;
+  padding: 4px 8px;
+}
+
+.marker-format-bar button {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 2px 7px;
+}
+
+.marker-format-bar .flat:checked {
+  background: alpha(@accent_bg_color, .22);
+}
+
+.marker-preview-action {
+  color: @accent_color;
+}
+
+.marker-heading-gutter {
+  color: alpha(@view_fg_color, .48);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.marker-line-gutter {
+  color: alpha(@view_fg_color, .48);
+}
+
+.marker-empty-state {
+  color: alpha(@window_fg_color, .72);
+}

@@ -78,7 +78,6 @@ echooption() {
 }
 
 sanitycheck MESON 'meson'
-sanitycheck MESONTEST 'mesontest'
 sanitycheck NINJA 'ninja' 'ninja-build'
 
 declare -A default_options=(
@@ -162,7 +161,7 @@ for key in "${!meson_options[@]}"; do
     cmd_options="$cmd_options -Denable-$key=${meson_options[$key]}"
 done
 
-exec ${MESON} \
+exec ${MESON} setup \
     --prefix=${prefix} \
     --libdir=${libdir} \
     --libexecdir=${libexecdir} \

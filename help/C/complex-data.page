@@ -43,4 +43,13 @@
     <p>More informations <link href="https://mermaidjs.github.io/">here</link>.</p>
   </section>
 
+  <section id="gnuplot">
+    <title>Gnuplot</title>
+    <p>Render a plot by putting a gnuplot program in a fenced code block:</p>
+    <screen>```gnuplot
+plot sin(x)
+```</screen>
+    <p>Plots are rendered automatically in the preview and embedded as SVG in HTML and PDF exports. Literal filenames in <code>plot</code> and <code>splot</code> commands may refer to CSV, DAT, or TXT files below the Markdown document's folder. Absolute paths, parent paths, and symlinks are rejected. Marker refreshes the preview when those files change.</p>
+  </section>
+
 </page>

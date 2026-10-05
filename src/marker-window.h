@@ -23,42 +23,49 @@
 #define __MARKER_WINDOW_H__
 
 #include <gio/gio.h>
-#include <gtk/gtk.h>
+#include <adwaita.h>
 
 #include "marker-editor.h"
+#include "marker-session.h"
 
 G_BEGIN_DECLS
 
 #define MARKER_TYPE_WINDOW (marker_window_get_type ())
 
-G_DECLARE_FINAL_TYPE (MarkerWindow, marker_window, MARKER, WINDOW, GtkApplicationWindow)
+G_DECLARE_FINAL_TYPE (MarkerWindow, marker_window, MARKER, WINDOW, AdwApplicationWindow)
 
 MarkerWindow        *marker_window_new                           (GtkApplication     *app);
 MarkerWindow        *marker_window_new_from_file                 (GtkApplication     *app,
                                                                   GFile              *file);
+MarkerWindow        *marker_window_new_from_workspace            (GtkApplication     *app,
+                                                                  GFile              *folder,
+                                                                  GError            **error);
 void                 marker_window_fullscreen                    (MarkerWindow       *window);
 void                 marker_window_unfullscreen                  (MarkerWindow       *window);
 void                 marker_window_toggle_fullscreen             (MarkerWindow       *window);
-gboolean             marker_window_is_fullscreen                 (MarkerWindow       *window);
 MarkerEditor        *marker_window_get_active_editor             (MarkerWindow       *window);
-void                 marker_window_open_file                     (MarkerWindow       *window);
-void                 marker_window_open_file_in_new_window       (MarkerWindow       *window);
 void                 marker_window_save_active_file              (MarkerWindow       *window);
 void                 marker_window_save_active_file_as           (MarkerWindow       *window);
-void                 marker_window_open_sketcher                 (MarkerWindow       *window);
 gboolean             marker_window_try_close                     (MarkerWindow       *window);
 void                 marker_window_close_current_document        (MarkerWindow       *window);
-void                 marker_window_toggle_sidebar                (MarkerWindow       *window);
-void                 marker_window_hide_sidebar                  (MarkerWindow       *window);
-void                 marker_window_show_sidebar                  (MarkerWindow       *window);
 
 void                 marker_window_new_editor                    (MarkerWindow       *window);
 void                 marker_window_new_editor_from_file          (MarkerWindow       *window,
                                                                   GFile              *file);
 
-void                 marker_window_search                        (MarkerWindow       *window);
 
-void 				 marker_window_refresh_all_preview			 (MarkerWindow       *window);
+void                 marker_window_apply_prefs                   (MarkerWindow       *window);
+void                 marker_window_add_project                  (MarkerWindow       *window,
+                                                                 GFile              *folder);
+void                 marker_window_restore_saved_document       (MarkerWindow       *window,
+                                                                 GFile              *file);
+MarkerSessionWindow *marker_window_capture_session              (MarkerWindow       *window);
+void                 marker_window_restore_navigation           (MarkerWindow       *window,
+                                                                 MarkerSessionWindow *session);
+void                 marker_window_set_active_project_index     (MarkerWindow       *window,
+                                                                 guint               index);
+void                 marker_window_set_active_document_uri      (MarkerWindow       *window,
+                                                                 const char          *uri);
 
 
 G_END_DECLS

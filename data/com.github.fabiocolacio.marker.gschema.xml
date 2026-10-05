@@ -5,6 +5,7 @@
     <value nick="preview-only" value="1"/>
     <value nick="dual-pane" value="2"/>
     <value nick="dual-window" value="3"/>
+    <value nick="formatted" value="4"/>
   </enum>
 
   <enum id="com.github.fabiocolacio.marker.MathJS">
@@ -19,6 +20,12 @@
   </schema>
 
   <schema path="/com/github/fabiocolacio/marker/preferences/editor/" id="com.github.fabiocolacio.marker.preferences.editor">
+    <key name="font" type="s">
+      <default>''</default>
+      <summary>Editor font</summary>
+      <description>A monospaced editor font. An empty value uses the system monospace font.</description>
+    </key>
+
     <key name="syntax-theme" type="s">
       <default>'tango'</default>
       <summary>Syntax Theme</summary>
@@ -85,6 +92,27 @@
       <description>Auto-indent code in the editor.</description>
     </key>
 
+    <key name="writing-width" type="u">
+      <default>640</default>
+      <summary>Formatted Markdown writing width</summary>
+      <description>The maximum logical width of the centered writing area.</description>
+    </key>
+
+    <key name="prose-font" type="s">
+      <default>'Monospace 11'</default>
+      <summary>Formatted Markdown prose font</summary>
+    </key>
+
+    <key name="code-font" type="s">
+      <default>'Monospace 11'</default>
+      <summary>Formatted Markdown code font</summary>
+    </key>
+
+    <key name="line-spacing" type="u">
+      <default>4</default>
+      <summary>Formatted Markdown line spacing</summary>
+    </key>
+
     <key name="spell-check" type="b">
       <default>false</default>
       <summary>Spell Check</summary>
@@ -106,9 +134,9 @@
     </key>
 
     <key name="css-toggle" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Enable CSS theme in Preview</summary>
-      <summary>Use a CSS theme in the live preview</summary>
+      <description>Use a CSS theme in the live preview</description>
     </key>
 
     <key name="mathjs-toggle" type="b">
@@ -133,6 +161,45 @@
       <default>true</default>
       <summary>Enable mermaid.js in Preview</summary>
       <description>Use mermaid.js to show diagram in the live preview.</description>
+    </key>
+
+    <key name="gnuplot-toggle" type="b">
+      <default>true</default>
+      <summary>Enable gnuplot in Preview</summary>
+      <description>Render gnuplot code blocks as plots in the preview and exports.</description>
+    </key>
+
+    <key name="override-header-font" type="b">
+      <default>false</default>
+      <summary>Override the preview heading font</summary>
+    </key>
+    <key name="header-font" type="s">
+      <default>'Sans Bold 18'</default>
+      <summary>Preview heading font</summary>
+    </key>
+    <key name="override-math-font" type="b">
+      <default>false</default>
+      <summary>Override the preview math font</summary>
+    </key>
+    <key name="math-font" type="s">
+      <default>'Serif 12'</default>
+      <summary>Preview math font</summary>
+    </key>
+    <key name="override-code-font" type="b">
+      <default>false</default>
+      <summary>Override the preview code font</summary>
+    </key>
+    <key name="code-font" type="s">
+      <default>'Monospace 11'</default>
+      <summary>Preview code font</summary>
+    </key>
+    <key name="override-text-font" type="b">
+      <default>false</default>
+      <summary>Override the preview text font</summary>
+    </key>
+    <key name="text-font" type="s">
+      <default>'Sans 12'</default>
+      <summary>Preview text font</summary>
     </key>
 
     <key name="highlight-theme" type="s">
@@ -165,13 +232,19 @@
       <description>When this is enabled, the dark variant of the current gtk theme will be used.</description>
     </key>
 
+    <key name="follow-system-theme" type="b">
+      <default>false</default>
+      <summary>Follow the system theme</summary>
+      <description>Follow the desktop light or dark appearance instead of the manual dark-mode setting.</description>
+    </key>
+
     <key name="window-width" type="u">
-      <default>900</default>
+      <default>1200</default>
       <summary>Window width</summary>
     </key>
 
     <key name="window-height" type="u">
-      <default>600</default>
+      <default>800</default>
       <summary>Window height</summary>
     </key>
 
@@ -186,8 +259,24 @@
     </key>
 
     <key name="show-sidebar" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Whether the sidebar is shown</summary>
+    </key>
+
+    <key name="profile-initialized" type="b">
+      <default>false</default>
+      <summary>Whether defaults for this profile have been initialized</summary>
+    </key>
+
+    <key name="focus-mode" type="b">
+      <default>false</default>
+      <summary>Whether focus mode is enabled</summary>
+    </key>
+
+    <key name="sidebar-sort" type="s">
+      <default>'name'</default>
+      <summary>Project sidebar sort order</summary>
+      <description>Sort files by name or modification time.</description>
     </key>
   </schema>
 </schemalist>

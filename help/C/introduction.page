@@ -18,6 +18,12 @@
   <p>Files are easy to open, edit, preview and save. At the right of the
   header bar, a menu contains various other features, such as printing, setting
   the zoom or change preferences.</p>
+
+  <p>To work with a folder of related documents, click <gui>Open…</gui> and choose
+  <gui>Open Folder…</gui>. The sidebar keeps open documents above a workspace tree of
+  Markdown files, images, and supported data files. Activate a Markdown file to
+  open it, or use the refresh button beside the folder name after files change
+  outside <app>Marker</app>.</p>
   
   <media type="image" mime="image/png" height="400" src="figures/scrot.png">
     <!--This is the alt text, as read out by screen readers and if the image is

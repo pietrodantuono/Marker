@@ -1,331 +1,594 @@
-/*
- * marker-source-view.c
+/* marker-source-view.c
  *
- * Copyright (C) 2017 - 2018 Fabio Colacio
- *
- * Marker is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public License as
- * published by the Free Software Foundation; either version 3 of the
- * License, or (at your option) any later version.
- *
- * Marker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public
- * License along with Marker; see the file LICENSE.md. If not,
- * see <http://www.gnu.org/licenses/>.
- *
+ * Copyright (C) 2017-2026 Marker contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#include <string.h>
-#include <stdlib.h>
-
 #include "marker-source-view.h"
-#include "marker-prefs.h"
-#include "marker-utils.h"
 
-#include <glib.h>
-#include <gio/gio.h>
-#include <glib/gi18n.h>
-#include <gtkspell/gtkspell.h>
+#include <libspelling.h>
+#include <string.h>
+
+#include "marker-formatted.h"
+#include "marker-heading-gutter.h"
+#include "marker-line-gutter.h"
+#include "marker-prefs.h"
 
 struct _MarkerSourceView
 {
-  GtkSourceView           parent_instance;
-  GSettings              *settings;
-  GtkSpellChecker        *spell;
+  GtkSourceView parent_instance;
+
+  GSettings *settings;
   GtkSourceSearchContext *search_context;
+  SpellingTextBufferAdapter *spelling;
+  GtkCssProvider *font_provider;
+  char *font_class;
+  MarkerMarkdownStructure *structure;
+  GPtrArray *spans;
+  GtkSourceGutterRenderer *heading_gutter;
+  GtkSourceGutterRenderer *line_gutter;
+  guint format_source;
+  guint writing_width;
+  gboolean formatted;
+  gboolean parse_dirty;
+  gboolean style_dirty;
 };
 
-G_DEFINE_TYPE(MarkerSourceView, marker_source_view, GTK_SOURCE_TYPE_VIEW)
+G_DEFINE_TYPE (MarkerSourceView, marker_source_view, GTK_SOURCE_TYPE_VIEW)
 
-void
-marker_source_view_surround_selection_with (MarkerSourceView *source_view,
-                                            const char       *insertion)
+enum { STRUCTURE_CHANGED, CURSOR_CHANGED, LAYOUT_CHANGED, LAST_SIGNAL };
+static guint source_signals[LAST_SIGNAL];
+
+static void
+ensure_structure (MarkerSourceView *self)
 {
-  GtkTextBuffer* buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (source_view));
-  GtkTextIter start, end;
-  gint start_index, end_index, selection_len;
-  gboolean selected;
-  size_t len = strlen (insertion);
+  if (!self->parse_dirty)
+    return;
 
-  selected = gtk_text_buffer_get_selection_bounds (buffer, &start, &end);
-
-  start_index = gtk_text_iter_get_line_offset (&start);
-  end_index = gtk_text_iter_get_line_offset (&end);
-  selection_len = end_index - start_index;
-
-  gtk_text_buffer_insert (buffer, &start, insertion, len);
-  gtk_text_iter_forward_chars (&start, selection_len);
-  gtk_text_buffer_insert (buffer, &start, insertion, len);
-
-  if (!selected)
-  {
-    gtk_text_iter_backward_chars (&start, len);
-    gtk_text_buffer_place_cursor (buffer, &start);
-  }
+  g_autofree char *text = marker_source_view_get_text (self);
+  g_clear_pointer (&self->structure, marker_markdown_structure_free);
+  g_clear_pointer (&self->spans, g_ptr_array_unref);
+  GtkSourceLanguage *language = gtk_source_buffer_get_language (GTK_SOURCE_BUFFER (
+    gtk_text_view_get_buffer (GTK_TEXT_VIEW (self))));
+  self->structure = marker_markdown_structure_parse (
+    language != NULL && g_str_equal (gtk_source_language_get_id (language), "markdown") ? text : "");
+  self->parse_dirty = FALSE;
+  self->style_dirty = TRUE;
+  gtk_widget_queue_draw (GTK_WIDGET (self->heading_gutter));
+  g_signal_emit (self, source_signals[STRUCTURE_CHANGED], 0);
 }
 
-void
-marker_source_view_insert_link (MarkerSourceView   *source_view)
+static gboolean
+format_idle_cb (gpointer user_data)
 {
-  GtkTextBuffer* buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (source_view));
-  GtkTextIter start, end;
-  gint start_index, end_index, selection_len;
-  gboolean selected;
+  MarkerSourceView *self = MARKER_SOURCE_VIEW (user_data);
+  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self));
+  GtkTextIter cursor;
+  GtkTextIter selection_start;
+  GtkTextIter selection_end;
 
-  selected = gtk_text_buffer_get_selection_bounds (buffer, &start, &end);
-  if (selected) {
-    start_index = gtk_text_iter_get_line_offset (&start);
-    end_index = gtk_text_iter_get_line_offset (&end);
-    selection_len = end_index - start_index;
+  self->format_source = 0;
+  ensure_structure (self);
+  if (self->formatted)
+    {
+      if (self->spans == NULL)
+        {
+          g_autofree char *text = marker_source_view_get_text (self);
+          self->spans = marker_formatted_parse (text, self->structure);
+        }
 
-    gchar * selected = gtk_text_buffer_get_text(buffer, &start, &end, TRUE);
-    if (!marker_utils_is_url(selected)) {
-      gtk_text_buffer_insert (buffer, &start, "[", 1);
-      gtk_text_iter_forward_chars (&start, selection_len);
-      gtk_text_buffer_insert (buffer, &start, "]()", 3);
-      gtk_text_iter_backward_chars(&start, 1);
-      gtk_text_buffer_place_cursor(buffer, &start);
+      gtk_text_buffer_get_iter_at_mark (buffer, &cursor, gtk_text_buffer_get_insert (buffer));
+      if (!gtk_text_buffer_get_selection_bounds (buffer, &selection_start, &selection_end))
+        selection_start = selection_end = cursor;
 
-    } else {
-      gtk_text_buffer_insert (buffer, &start, "[](", 3);
-      gtk_text_iter_forward_chars (&start, selection_len);
-      gtk_text_buffer_insert (buffer, &start, ")", 1);
-      gtk_text_iter_backward_chars(&start, selection_len + 3);
-      gtk_text_buffer_place_cursor(buffer, &start);
+      marker_formatted_apply (buffer, self->spans,
+                              gtk_text_iter_get_offset (&cursor),
+                              gtk_text_iter_get_offset (&selection_start),
+                              gtk_text_iter_get_offset (&selection_end),
+                              TRUE, self->style_dirty);
+      self->style_dirty = FALSE;
     }
-  } else {
-    gchar * link = g_strdup("[]()");
-    GtkTextMark * mark = gtk_text_buffer_get_insert(buffer);
-    gtk_text_buffer_get_iter_at_mark(buffer, &start, mark);
-    size_t len = strlen(link);
+  g_signal_emit (self, source_signals[CURSOR_CHANGED], 0);
+  return G_SOURCE_REMOVE;
+}
 
-    gtk_text_buffer_insert(buffer, &start, link, len);
-    gtk_text_iter_backward_chars(&start, 3);
-    gtk_text_buffer_place_cursor(buffer, &start);
-    g_free(link);
-  }
+static void
+queue_format (MarkerSourceView *self)
+{
+  if (self->format_source == 0)
+    self->format_source = g_idle_add_full (G_PRIORITY_LOW,
+                                          format_idle_cb,
+                                          self, NULL);
+}
+
+static void
+buffer_changed_cb (GtkTextBuffer    *buffer,
+                   MarkerSourceView *self)
+{
+  self->parse_dirty = TRUE;
+  gtk_widget_queue_resize (GTK_WIDGET (self->line_gutter));
+  queue_format (self);
+}
+
+static void
+mark_set_cb (GtkTextBuffer    *buffer,
+             GtkTextIter      *location,
+             GtkTextMark      *mark,
+             MarkerSourceView *self)
+{
+  if (mark == gtk_text_buffer_get_insert (buffer) ||
+      mark == gtk_text_buffer_get_selection_bound (buffer))
+    queue_format (self);
+}
+
+static void
+marker_source_view_size_allocate (GtkWidget *widget,
+                                  int        width,
+                                  int        height,
+                                  int        baseline)
+{
+  MarkerSourceView *self = MARKER_SOURCE_VIEW (widget);
+
+  if (self->formatted)
+    {
+      int margin = MAX (18, (width - (int) self->writing_width) / 2);
+      GtkSourceGutter *gutter = gtk_source_view_get_gutter (GTK_SOURCE_VIEW (self), GTK_TEXT_WINDOW_LEFT);
+      int numbers = MAX (0, gtk_widget_get_width (GTK_WIDGET (gutter)) -
+                             gtk_widget_get_width (GTK_WIDGET (self->heading_gutter)));
+      gtk_widget_set_size_request (GTK_WIDGET (self->heading_gutter), MAX (34, margin - numbers - 18), -1);
+      gtk_text_view_set_left_margin (GTK_TEXT_VIEW (self), 18);
+      gtk_text_view_set_right_margin (GTK_TEXT_VIEW (self), margin);
+    }
+  GTK_WIDGET_CLASS (marker_source_view_parent_class)->size_allocate (widget,
+                                                                     width,
+                                                                     height,
+                                                                     baseline);
+  g_signal_emit (self, source_signals[LAYOUT_CHANGED], 0);
+}
+
+static void
+marker_source_view_dispose (GObject *object)
+{
+  MarkerSourceView *self = MARKER_SOURCE_VIEW (object);
+
+  g_clear_handle_id (&self->format_source, g_source_remove);
+  g_clear_object (&self->settings);
+  g_clear_object (&self->search_context);
+  g_clear_object (&self->spelling);
+  if (self->font_provider != NULL)
+    gtk_style_context_remove_provider_for_display (
+      gtk_widget_get_display (GTK_WIDGET (self)),
+      GTK_STYLE_PROVIDER (self->font_provider));
+  g_clear_object (&self->font_provider);
+  g_clear_pointer (&self->font_class, g_free);
+  g_clear_pointer (&self->structure, marker_markdown_structure_free);
+  g_clear_pointer (&self->spans, g_ptr_array_unref);
+  G_OBJECT_CLASS (marker_source_view_parent_class)->dispose (object);
+}
+
+static void
+marker_source_view_class_init (MarkerSourceViewClass *klass)
+{
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+  GtkWidgetClass *widget_class = GTK_WIDGET_CLASS (klass);
+
+  object_class->dispose = marker_source_view_dispose;
+  widget_class->size_allocate = marker_source_view_size_allocate;
+  source_signals[STRUCTURE_CHANGED] = g_signal_new ("structure-changed", G_TYPE_FROM_CLASS (klass),
+    G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+  source_signals[CURSOR_CHANGED] = g_signal_new ("cursor-changed", G_TYPE_FROM_CLASS (klass),
+    G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+  source_signals[LAYOUT_CHANGED] = g_signal_new ("layout-changed", G_TYPE_FROM_CLASS (klass),
+    G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+}
+
+static void
+sync_line_gutter (MarkerSourceView *self)
+{
+  gboolean show = gtk_source_view_get_show_line_numbers (GTK_SOURCE_VIEW (self));
+  GtkSourceGutter *gutter = gtk_source_view_get_gutter (GTK_SOURCE_VIEW (self), GTK_TEXT_WINDOW_LEFT);
+  for (GtkWidget *child = gtk_widget_get_first_child (GTK_WIDGET (gutter)); child != NULL;
+       child = gtk_widget_get_next_sibling (child))
+    if (GTK_SOURCE_IS_GUTTER_RENDERER_TEXT (child) && child != GTK_WIDGET (self->heading_gutter) &&
+        child != GTK_WIDGET (self->line_gutter))
+      gtk_widget_set_visible (child, show && !self->formatted);
+  gtk_widget_set_visible (GTK_WIDGET (self->line_gutter), show && self->formatted);
+}
+
+static void
+marker_source_view_init (MarkerSourceView *self)
+{
+  static guint next_font_class;
+  GtkSourceBuffer *buffer = gtk_source_buffer_new (NULL);
+  GtkSourceSearchSettings *search_settings = gtk_source_search_settings_new ();
+  SpellingChecker *checker = spelling_checker_get_default ();
+
+  self->settings = g_settings_new ("com.github.fabiocolacio.marker.preferences.editor");
+  self->writing_width = g_settings_get_uint (self->settings, "writing-width");
+  self->font_provider = gtk_css_provider_new ();
+  self->font_class = g_strdup_printf ("marker-source-font-%u", next_font_class++);
+
+  gtk_text_view_set_buffer (GTK_TEXT_VIEW (self), GTK_TEXT_BUFFER (buffer));
+  self->parse_dirty = TRUE;
+  self->heading_gutter = marker_heading_gutter_new ();
+  gtk_source_gutter_insert (gtk_source_view_get_gutter (GTK_SOURCE_VIEW (self), GTK_TEXT_WINDOW_LEFT),
+                            self->heading_gutter, -20);
+  gtk_widget_set_visible (GTK_WIDGET (self->heading_gutter), FALSE);
+  self->line_gutter = marker_line_gutter_new ();
+  gtk_source_gutter_insert (gtk_source_view_get_gutter (GTK_SOURCE_VIEW (self), GTK_TEXT_WINDOW_LEFT),
+                            self->line_gutter, -30);
+  gtk_widget_set_visible (GTK_WIDGET (self->line_gutter), FALSE);
+  g_signal_connect_swapped (self, "notify::show-line-numbers", G_CALLBACK (sync_line_gutter), self);
+  gtk_text_view_set_top_margin (GTK_TEXT_VIEW (self), 40);
+  gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (self), 64);
+  gtk_text_view_set_left_margin (GTK_TEXT_VIEW (self), 18);
+  gtk_text_view_set_right_margin (GTK_TEXT_VIEW (self), 18);
+  gtk_text_view_set_pixels_above_lines (GTK_TEXT_VIEW (self), 1);
+  gtk_text_view_set_pixels_below_lines (GTK_TEXT_VIEW (self), 1);
+  gtk_widget_add_css_class (GTK_WIDGET (self), "marker-source-view");
+  gtk_widget_add_css_class (GTK_WIDGET (self), self->font_class);
+  gtk_style_context_add_provider_for_display (
+    gtk_widget_get_display (GTK_WIDGET (self)),
+    GTK_STYLE_PROVIDER (self->font_provider),
+    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+
+  self->search_context = gtk_source_search_context_new (buffer, search_settings);
+  self->spelling = spelling_text_buffer_adapter_new (buffer, checker);
+  gtk_text_view_set_extra_menu (GTK_TEXT_VIEW (self),
+                                spelling_text_buffer_adapter_get_menu_model (self->spelling));
+  gtk_widget_insert_action_group (GTK_WIDGET (self), "spelling",
+                                  G_ACTION_GROUP (self->spelling));
+
+  g_signal_connect_object (buffer, "changed", G_CALLBACK (buffer_changed_cb), self, 0);
+  g_signal_connect_object (buffer, "mark-set", G_CALLBACK (mark_set_cb), self, 0);
+
+  marker_source_view_set_language (self, "markdown");
+  marker_source_view_apply_font (self);
+  marker_source_view_set_spell_check (self, marker_prefs_get_spell_check ());
+  g_autofree char *language = marker_prefs_get_spell_check_language ();
+  marker_source_view_set_spell_check_lang (self, language);
+  queue_format (self);
+  g_object_unref (search_settings);
+  g_object_unref (buffer);
+}
+
+MarkerSourceView *
+marker_source_view_new (void)
+{
+  return g_object_new (MARKER_TYPE_SOURCE_VIEW,
+                       "show-line-numbers", marker_prefs_get_show_line_numbers (),
+                       "highlight-current-line", marker_prefs_get_highlight_current_line (),
+                       "show-right-margin", marker_prefs_get_show_right_margin (),
+                       "right-margin-position", marker_prefs_get_right_margin_position (),
+                       "auto-indent", marker_prefs_get_auto_indent (),
+                       "insert-spaces-instead-of-tabs", marker_prefs_get_replace_tabs (),
+                       "tab-width", marker_prefs_get_tab_width (),
+                       NULL);
+}
+
+static char *
+font_css (const char *font,
+          const char *selector)
+{
+  g_autoptr (PangoFontDescription) description = pango_font_description_from_string (font);
+  const char *family = pango_font_description_get_family (description);
+  int size = pango_font_description_get_size (description);
+  int weight = pango_font_description_get_weight (description);
+
+  if (size <= 0)
+    size = 11 * PANGO_SCALE;
+  return g_strdup_printf ("%s { font-family: \"%s\"; font-size: %.1fpt; font-weight: %d; }",
+                          selector,
+                          family != NULL ? family : "monospace",
+                          (double) size / PANGO_SCALE,
+                          weight);
 }
 
 void
-marker_source_view_insert_image (MarkerSourceView   *source_view,
-                                 const char         *image_path)
+marker_source_view_apply_font (MarkerSourceView *self)
 {
-  GtkTextBuffer* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(source_view));
-  GtkTextIter start ;
+  g_autofree char *font = NULL;
+  g_autofree char *css = NULL;
+  g_autofree char *selector = NULL;
+  guint line_spacing;
 
-  gtk_text_buffer_get_iter_at_mark(buffer, &start, gtk_text_buffer_get_insert(buffer));
+  g_return_if_fail (MARKER_IS_SOURCE_VIEW (self));
 
-  gchar * img = g_strdup_printf("![](%s)", image_path);
-
-  size_t len = strlen(img);
-
-  gtk_text_buffer_insert(buffer, &start, img, len);
-  g_free(img);
-}
-
-void
-marker_source_view_set_spell_check(MarkerSourceView *source_view,
-                                   gboolean          state)
-{
-  g_assert (MARKER_IS_SOURCE_VIEW (source_view));
-
-  gboolean is_attached =
-    source_view->spell == gtk_spell_checker_get_from_text_view (GTK_TEXT_VIEW (source_view));
-
-  if (state && !is_attached)
-  {
-    gtk_spell_checker_attach((GtkSpellChecker*)source_view->spell, GTK_TEXT_VIEW(source_view));
-  }
-  else if (!state && is_attached)
-  {
-    g_object_ref (source_view->spell);
-    gtk_spell_checker_detach((GtkSpellChecker*)source_view->spell);
-  }
-}
-
-void
-marker_source_view_set_spell_check_lang (MarkerSourceView *source_view,
-                                         const gchar      *lang)
-{
-  g_assert (MARKER_IS_SOURCE_VIEW (source_view));
-  gtk_spell_checker_set_language (source_view->spell, lang, NULL);
-}
-
-void
-marker_source_view_set_syntax_theme(MarkerSourceView* source_view,
-                                    const char*       theme)
-{
-  GtkTextBuffer* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(source_view));
-  GtkSourceStyleSchemeManager* style_manager =
-    gtk_source_style_scheme_manager_get_default();
-  GtkSourceStyleScheme* scheme =
-    gtk_source_style_scheme_manager_get_scheme(style_manager, theme);
-  gtk_source_buffer_set_style_scheme(GTK_SOURCE_BUFFER(buffer), scheme);
+  font = self->formatted
+           ? g_settings_get_string (self->settings, "prose-font")
+           : marker_prefs_get_editor_font ();
+  line_spacing = self->formatted
+                   ? g_settings_get_uint (self->settings, "line-spacing") : 2;
+  gtk_text_view_set_pixels_above_lines (GTK_TEXT_VIEW (self), line_spacing / 2);
+  gtk_text_view_set_pixels_below_lines (GTK_TEXT_VIEW (self),
+                                        line_spacing - line_spacing / 2);
+  selector = g_strdup_printf (".%s", self->font_class);
+  css = font_css (font, selector);
+  gtk_css_provider_load_from_string (self->font_provider, css);
 }
 
 gboolean
-marker_source_view_get_modified(MarkerSourceView* source_view)
+marker_source_view_get_modified (MarkerSourceView *self)
 {
-  GtkTextBuffer* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(source_view));
-  return gtk_text_buffer_get_modified(buffer);
+  return gtk_text_buffer_get_modified (gtk_text_view_get_buffer (GTK_TEXT_VIEW (self)));
 }
 
 void
-marker_source_view_set_modified(MarkerSourceView* source_view,
-                                gboolean          modified)
+marker_source_view_set_modified (MarkerSourceView *self,
+                                 gboolean          modified)
 {
-  GtkTextBuffer* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(source_view));
-  gtk_text_buffer_set_modified(buffer, modified);
+  gtk_text_buffer_set_modified (gtk_text_view_get_buffer (GTK_TEXT_VIEW (self)), modified);
 }
 
-gchar*
-marker_source_view_get_text(MarkerSourceView* source_view,
-                            gboolean          include_position)
+gchar *
+marker_source_view_get_text (MarkerSourceView *self)
 {
-  GtkTextBuffer* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(source_view));
-  GtkTextIter start, end;
-  gtk_text_buffer_get_start_iter(buffer, &start);
-  gtk_text_buffer_get_end_iter(buffer, &end);
-  if (include_position && !gtk_text_iter_equal(&start, &end)) {
-    gchar * identifier = g_strdup("<span id=\"cursor_pos\"></span>"); 
-    GtkTextIter pos;
-    gtk_text_buffer_get_selection_bounds (buffer, &pos, NULL);
-    gchar * beginning = gtk_text_buffer_get_text(buffer, &start, &pos, FALSE);
-    gchar * ending = gtk_text_buffer_get_text(buffer, &pos, &end, FALSE);
-    return g_strconcat(beginning, identifier, ending, NULL);
-  }
-  return gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self));
+  GtkTextIter start;
+  GtkTextIter end;
+
+  gtk_text_buffer_get_bounds (buffer, &start, &end);
+  return gtk_text_buffer_get_text (buffer, &start, &end, FALSE);
 }
 
-int                      
-marker_source_view_get_cursor_position (MarkerSourceView   *source_view)
+void
+marker_source_view_set_text (MarkerSourceView *self,
+                             const char       *text,
+                             size_t            size)
 {
-  GtkTextBuffer* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(source_view));
-  GtkTextIter pos;
-  gtk_text_buffer_get_selection_bounds (buffer, &pos, NULL);
-  return gtk_text_iter_get_offset(&pos);
+  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self));
+  GtkTextIter start;
+
+  gtk_text_buffer_set_text (buffer, text != NULL ? text : "", size);
+  gtk_text_buffer_get_start_iter (buffer, &start);
+  gtk_text_buffer_place_cursor (buffer, &start);
+  gtk_text_buffer_set_modified (buffer, FALSE);
+  queue_format (self);
+}
+
+void
+marker_source_view_set_language (MarkerSourceView *self,
+                                 const gchar      *language)
+{
+  GtkSourceLanguageManager *manager = gtk_source_language_manager_get_default ();
+  GtkSourceLanguage *source_language = gtk_source_language_manager_get_language (manager, language);
+  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self));
+
+  gtk_source_buffer_set_language (GTK_SOURCE_BUFFER (buffer), source_language);
+  gtk_source_buffer_set_highlight_syntax (GTK_SOURCE_BUFFER (buffer), !self->formatted);
+  self->parse_dirty = TRUE;
+  queue_format (self);
+}
+
+void
+marker_source_view_set_syntax_theme (MarkerSourceView *self,
+                                     const char       *theme)
+{
+  GtkSourceStyleSchemeManager *manager = gtk_source_style_scheme_manager_get_default ();
+  GtkSourceStyleScheme *scheme = gtk_source_style_scheme_manager_get_scheme (manager, theme);
+
+  if (self->formatted)
+    scheme = gtk_source_style_scheme_manager_get_scheme (manager,
+      marker_prefs_get_use_dark_theme () ? "Adwaita-dark" : "Adwaita");
+  else if (marker_prefs_get_use_dark_theme ())
+    {
+      GtkSourceStyleScheme *dark = gtk_source_style_scheme_manager_get_scheme (manager, "oblivion");
+      if (dark != NULL)
+        scheme = dark;
+    }
+
+  gtk_source_buffer_set_style_scheme (GTK_SOURCE_BUFFER (
+    gtk_text_view_get_buffer (GTK_TEXT_VIEW (self))), scheme);
+}
+
+static void
+word_or_selection_bounds (GtkTextBuffer *buffer,
+                          GtkTextIter   *start,
+                          GtkTextIter   *end,
+                          gboolean      *selected)
+{
+  *selected = gtk_text_buffer_get_selection_bounds (buffer, start, end);
+  if (*selected)
+    return;
+
+  gtk_text_buffer_get_iter_at_mark (buffer, start, gtk_text_buffer_get_insert (buffer));
+  *end = *start;
+  if (!gtk_text_iter_starts_word (start))
+    gtk_text_iter_backward_word_start (start);
+  if (!gtk_text_iter_ends_word (end))
+    gtk_text_iter_forward_word_end (end);
+}
+
+void
+marker_source_view_surround_selection_with (MarkerSourceView *self,
+                                            const char       *insertion)
+{
+  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self));
+  GtkTextIter start;
+  GtkTextIter end;
+  gboolean selected;
+  gsize length = strlen (insertion);
+  g_autofree char *contents = NULL;
+
+  word_or_selection_bounds (buffer, &start, &end, &selected);
+  contents = gtk_text_buffer_get_text (buffer, &start, &end, TRUE);
+
+  gtk_text_buffer_begin_user_action (buffer);
+  if (g_str_has_prefix (contents, insertion) && g_str_has_suffix (contents, insertion) &&
+      strlen (contents) >= length * 2)
+    {
+      GtkTextIter inner_start = start;
+      GtkTextIter inner_end = end;
+      gtk_text_iter_forward_chars (&inner_start, length);
+      gtk_text_iter_backward_chars (&inner_end, length);
+      g_autofree char *inner = gtk_text_buffer_get_text (buffer, &inner_start, &inner_end, TRUE);
+      gtk_text_buffer_delete (buffer, &start, &end);
+      gtk_text_buffer_insert (buffer, &start, inner, -1);
+    }
+  else
+    {
+      gtk_text_buffer_insert (buffer, &end, insertion, -1);
+      gtk_text_buffer_insert (buffer, &start, insertion, -1);
+      if (!selected && *contents == '\0')
+        {
+          gtk_text_iter_backward_chars (&start, length);
+          gtk_text_buffer_place_cursor (buffer, &start);
+        }
+    }
+  gtk_text_buffer_end_user_action (buffer);
+}
+
+void
+marker_source_view_insert_link (MarkerSourceView *self)
+{
+  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self));
+  GtkTextIter start;
+  GtkTextIter end;
+
+  if (gtk_text_buffer_get_selection_bounds (buffer, &start, &end))
+    {
+      gtk_text_buffer_begin_user_action (buffer);
+      gtk_text_buffer_insert (buffer, &end, "]()", -1);
+      gtk_text_buffer_insert (buffer, &start, "[", -1);
+      gtk_text_buffer_end_user_action (buffer);
+    }
+  else
+    {
+      gtk_text_buffer_get_iter_at_mark (buffer, &start, gtk_text_buffer_get_insert (buffer));
+      gtk_text_buffer_insert (buffer, &start, "[]()", -1);
+      gtk_text_iter_backward_chars (&start, 3);
+      gtk_text_buffer_place_cursor (buffer, &start);
+    }
 }
 
 
 void
-marker_source_view_set_text(MarkerSourceView* source_view,
-                            const char*       text,
-                            size_t            size)
+marker_source_view_set_spell_check (MarkerSourceView *self,
+                                    gboolean          state)
 {
-  GtkTextBuffer* buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(source_view));
-  gtk_text_buffer_set_text(buffer, text, size);
+  spelling_text_buffer_adapter_set_enabled (self->spelling, state);
 }
 
 void
-marker_source_view_set_language(MarkerSourceView* source_view,
-                                const gchar*      language_name)
+marker_source_view_set_spell_check_lang (MarkerSourceView *self,
+                                         const gchar      *lang)
 {
-  if (GTK_SOURCE_IS_VIEW(source_view))
-  {
-    GtkSourceLanguageManager* manager =
-      gtk_source_language_manager_get_default();
-
-    GtkSourceLanguage* language =
-      gtk_source_language_manager_get_language(manager, language_name);
-
-    GtkSourceBuffer* buffer =
-      GTK_SOURCE_BUFFER(gtk_text_view_get_buffer(GTK_TEXT_VIEW(source_view)));
-
-    gtk_source_buffer_set_language(buffer, language);
-
-    g_object_unref(manager);
-  }
+  spelling_text_buffer_adapter_set_language (self->spelling, lang);
 }
 
-static void
-default_font_changed(GSettings*   settings,
-                     const gchar* key,
-                     gpointer     user_data)
+int
+marker_source_view_get_cursor_position (MarkerSourceView *self)
 {
-  MarkerSourceView* source_view = (MarkerSourceView*) user_data;
-  gchar* fontname = g_settings_get_string(settings, key);
-  PangoFontDescription* font = pango_font_description_from_string(fontname);
-  gtk_widget_modify_font(GTK_WIDGET(source_view), font);
-  pango_font_description_free(font);
-  g_free(fontname);
+  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self));
+  GtkTextIter cursor;
+  gtk_text_buffer_get_iter_at_mark (buffer, &cursor, gtk_text_buffer_get_insert (buffer));
+  return gtk_text_iter_get_offset (&cursor);
 }
 
-static void
-reload_menu_item_activate_cb (GtkMenuItem *menuitem,
-                              gpointer     user_data)
+GtkSourceSearchContext *
+marker_source_get_search_context (MarkerSourceView *self)
 {
-  MarkerSourceView *source_view = MARKER_SOURCE_VIEW (user_data);
-  GtkWidget *toplevel = gtk_widget_get_toplevel (GTK_WIDGET (source_view));
-
-  if (G_IS_ACTION_GROUP (toplevel))
-  {
-    g_action_group_activate_action (G_ACTION_GROUP (toplevel), "reload", NULL);
-  }
+  return self->search_context;
 }
 
-static void
-marker_source_view_populate_popup (GtkTextView *text_view,
-                                   GtkWidget   *menu,
-                                   gpointer     user_data)
+void
+marker_source_view_set_formatted (MarkerSourceView *self,
+                                  gboolean          formatted)
 {
-  GtkWidget *reload_item = gtk_menu_item_new_with_mnemonic (_("_Reload from Disk"));
-  g_signal_connect (reload_item, "activate",
-                    G_CALLBACK (reload_menu_item_activate_cb), user_data);
+  GtkTextBuffer *buffer;
 
-  gtk_menu_shell_append (GTK_MENU_SHELL (menu), reload_item);
-  gtk_widget_show (reload_item);
+  g_return_if_fail (MARKER_IS_SOURCE_VIEW (self));
+  if (self->formatted == formatted)
+    return;
+
+  self->formatted = formatted;
+  buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self));
+  gtk_source_buffer_set_highlight_syntax (GTK_SOURCE_BUFFER (buffer), !formatted);
+  gtk_source_view_set_show_line_numbers (GTK_SOURCE_VIEW (self), marker_prefs_get_show_line_numbers ());
+  gtk_source_view_set_show_right_margin (GTK_SOURCE_VIEW (self), !formatted && marker_prefs_get_show_right_margin ());
+  gtk_widget_set_visible (GTK_WIDGET (self->heading_gutter), formatted);
+  sync_line_gutter (self);
+  gtk_widget_set_name (GTK_WIDGET (self), formatted ? "formatted-source" : "source");
+  g_autofree char *theme = marker_prefs_get_syntax_theme ();
+  marker_source_view_set_syntax_theme (self, theme);
+  marker_source_view_apply_font (self);
+
+  if (formatted)
+    {
+      self->style_dirty = TRUE;
+      queue_format (self);
+    }
+  else
+    {
+      marker_formatted_clear (buffer);
+      gtk_text_view_set_left_margin (GTK_TEXT_VIEW (self), 18);
+      gtk_text_view_set_right_margin (GTK_TEXT_VIEW (self), 18);
+    }
+
+  gtk_widget_queue_resize (GTK_WIDGET (self));
 }
 
-static void
-marker_source_view_init (MarkerSourceView *source_view)
+
+void
+marker_source_view_set_writing_width (MarkerSourceView *self,
+                                      guint             width)
 {
-  GtkSourceSearchContext * search_context = gtk_source_search_context_new(GTK_SOURCE_BUFFER(gtk_text_view_get_buffer(GTK_TEXT_VIEW(source_view))),
-                                                                          NULL);
-  source_view->search_context = search_context;
-  marker_source_view_set_language (source_view, "markdown");
-  source_view->settings = g_settings_new ("org.gnome.desktop.interface");
-  g_signal_connect (source_view->settings, "changed::monospace-font-name", G_CALLBACK (default_font_changed), source_view);
-  gchar *fontname = g_settings_get_string (source_view->settings, "monospace-font-name");
-  PangoFontDescription* font = pango_font_description_from_string (fontname);
-  gtk_widget_modify_font (GTK_WIDGET (source_view), font);
-  pango_font_description_free (font);
-  g_free (fontname);
-
-  gtk_source_view_set_insert_spaces_instead_of_tabs (GTK_SOURCE_VIEW (source_view), marker_prefs_get_replace_tabs ());
-  gtk_source_view_set_tab_width (GTK_SOURCE_VIEW (source_view), marker_prefs_get_tab_width ());
-  gtk_source_view_set_auto_indent (GTK_SOURCE_VIEW (source_view), marker_prefs_get_auto_indent ());
-
-  source_view->spell = gtk_spell_checker_new ();
-  gchar* lang = marker_prefs_get_spell_check_language();
-  gtk_spell_checker_set_language (source_view->spell, lang, NULL);
-  if (marker_prefs_get_spell_check ()){
-    gtk_spell_checker_attach (source_view->spell, GTK_TEXT_VIEW (source_view));
-  }
-
-  g_signal_connect (source_view,
-                    "populate-popup",
-                    G_CALLBACK (marker_source_view_populate_popup),
-                    source_view);
+  g_return_if_fail (MARKER_IS_SOURCE_VIEW (self));
+  self->writing_width = CLAMP (width, 520, 1400);
+  gtk_widget_queue_resize (GTK_WIDGET (self));
 }
 
-static void
-marker_source_view_class_init(MarkerSourceViewClass* class)
+void
+marker_source_view_reapply_formatted (MarkerSourceView *self)
 {
-
+  self->style_dirty = TRUE;
+  queue_format (self);
 }
 
-MarkerSourceView*
-marker_source_view_new(void)
+const MarkerMarkdownStructure *
+marker_source_view_get_structure (MarkerSourceView *self)
 {
-  return g_object_new(MARKER_TYPE_SOURCE_VIEW, NULL);
+  ensure_structure (self);
+  return self->structure;
 }
 
-GtkSourceSearchContext*
-marker_source_get_search_context (MarkerSourceView   *source_view)
+void
+marker_source_view_set_heading_level (MarkerSourceView *self, guint line, guint level)
 {
-  return source_view->search_context;
+  g_return_if_fail (level <= 6);
+  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self));
+  const MarkerMarkdownStructure *structure = marker_source_view_get_structure (self);
+  const MarkerHeading *heading = marker_markdown_structure_heading_at_line (structure, line);
+  GtkTextIter start, end, cursor;
+  gtk_text_buffer_get_iter_at_line (buffer, &start, line);
+  end = start;
+  gtk_text_iter_forward_to_line_end (&end);
+  for (guint i = 0; heading == NULL && i < structure->blocks->len; i++)
+    {
+      const MarkerBlock *block = &g_array_index (structure->blocks, MarkerBlock, i);
+      if ((guint) gtk_text_iter_get_offset (&start) >= block->start &&
+          (guint) gtk_text_iter_get_offset (&start) <= block->end)
+        return;
+    }
+  g_autofree char *content = NULL;
+  guint title_start = gtk_text_iter_get_offset (&start);
+  if (heading != NULL)
+    {
+      content = g_strdup (heading->title);
+      title_start = heading->title_start;
+      gtk_text_buffer_get_iter_at_offset (buffer, &start, heading->start);
+      gtk_text_buffer_get_iter_at_offset (buffer, &end, heading->end);
+    }
+  else
+    content = gtk_text_buffer_get_text (buffer, &start, &end, TRUE);
+  gtk_text_buffer_get_iter_at_mark (buffer, &cursor, gtk_text_buffer_get_insert (buffer));
+  int relative = CLAMP (gtk_text_iter_get_offset (&cursor) - (int) title_start, 0, g_utf8_strlen (content, -1));
+  guint position = gtk_text_iter_get_offset (&start) + (level > 0 ? level + 1 : 0) + relative;
+  g_autofree char *replacement = level == 0 ? g_strdup (content) : g_strdup_printf ("%.*s %s", level, "######", content);
+  gtk_text_buffer_begin_user_action (buffer);
+  gtk_text_buffer_delete (buffer, &start, &end);
+  gtk_text_buffer_insert (buffer, &start, replacement, -1);
+  gtk_text_buffer_get_iter_at_offset (buffer, &cursor, position);
+  gtk_text_buffer_place_cursor (buffer, &cursor);
+  gtk_text_buffer_end_user_action (buffer);
 }

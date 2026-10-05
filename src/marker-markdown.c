@@ -32,15 +32,7 @@
 
 #include "marker-markdown.h"
 #include "marker-prefs.h"
-
-struct css_buffer_{
-  gchar * location;
-  char * css; 
-  char * scidown;
-} typedef css_buffer_;
-
-css_buffer_ buffer_ = {0, 0, 0};
-
+#include "marker-render-style.h"
 
 char* html_header(MarkerMathJSMode    mathjs_mode,
                   MarkerHighlightMode highlight_mode,
@@ -60,6 +52,7 @@ char* html_header(MarkerMathJSMode    mathjs_mode,
 
 
   switch (mathjs_mode) {
+    default:
     case MATHJS_OFF:
       mathjs_script = g_strdup(" ");
       mathjs_css = g_strdup(" ");
@@ -68,7 +61,7 @@ char* html_header(MarkerMathJSMode    mathjs_mode,
   case MATHJS_NET:
       if (backend == KATEX)
       {
-        mathjs_css = g_strdup("<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.9.0-alpha2/katex.min.css\" crossorigin=\"anonymous\">");
+        mathjs_css = g_strdup("<style>@import url(\"https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.9.0-alpha2/katex.min.css\") layer(marker-base);</style>");
         mathjs_script = g_strdup("<script src=\"https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.9.0-alpha2/katex.min.js\" crossorigin=\"anonymous\"></script>");
         mathjs_auto = g_strdup("<script src=\"https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.9.0-alpha2/contrib/auto-render.min.js\" crossorigin=\"anonymous\"></script>");
       } else
@@ -81,7 +74,7 @@ char* html_header(MarkerMathJSMode    mathjs_mode,
   case MATHJS_LOCAL:
       if (backend == KATEX)
       {
-        mathjs_css = g_strdup_printf("<link rel=\"stylesheet\" href=\"file://%skatex/katex.min.css\">", SCRIPTS_DIR);
+        mathjs_css = g_strdup_printf("<style>@import url(\"file://%skatex/katex.min.css\") layer(marker-base);</style>", SCRIPTS_DIR);
         mathjs_script = g_strdup_printf("<script src=\"file://%skatex/katex.min.js\"></script>", SCRIPTS_DIR);
         mathjs_auto = g_strdup_printf("<script src=\"file://%skatex/contrib/auto-render.min.js\"></script>", SCRIPTS_DIR);
       } else
@@ -94,28 +87,30 @@ char* html_header(MarkerMathJSMode    mathjs_mode,
   }
 
  switch (highlight_mode){
+    default:
     case HIGHLIGHT_OFF:
       highlight_css = g_strdup(" ");
       highlight_script = g_strdup(" ");
       break;
     case HIGHLIGHT_NET:
-      highlight_css = g_strdup_printf("<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/%s.min.css\">",
+      highlight_css = g_strdup_printf("<style>@import url(\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/%s.min.css\") layer(marker-base);</style>",
                                       local_highlight_css);
       highlight_script = g_strdup("<script src=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/highlight.min.js\"></script>");
       break;
     case HIGHLIGHT_LOCAL:
-      highlight_css = g_strdup_printf("<link rel=\"stylesheet\" href=\"file://%shighlight/styles/%s.css\">", SCRIPTS_DIR, local_highlight_css);
+      highlight_css = g_strdup_printf("<style>@import url(\"file://%shighlight/styles/%s.css\") layer(marker-base);</style>", SCRIPTS_DIR, local_highlight_css);
       highlight_script = g_strdup_printf("<script src=\"file://%shighlight/highlight.pack.js\"></script>", SCRIPTS_DIR);
       break;
   }
 
   switch (mermaid_mode)
   {
+    default:
     case MERMAID_OFF:
       mermaid_script = g_strdup(" ");
       break;
     case MERMAID_NET:
-      mermaid_script = g_strdup("<script src=\"https://unpkg.com/mermaid@7.1.2/dist/mermaid.min.js\"></script>");
+      mermaid_script = g_strdup("<script src=\"https://unpkg.com/mermaid@12.1.0/dist/mermaid.min.js\"></script>");
       break;
     case MERMAID_LOCAL:
       mermaid_script = g_strdup_printf("<script src=\"file://%smermaid/mermaid.min.js\"></script>", SCRIPTS_DIR);
@@ -149,38 +144,50 @@ html_footer(MarkerMathJSMode     mathjs_mode,
   MarkerMathBackEnd backend = marker_prefs_get_math_backend();
 
   switch(mathjs_mode){
+    default:
     case MATHJS_OFF:
       mathjs_render = g_strdup(" ");
       break;
-    default:
-      if (backend == KATEX)
-        mathjs_render = g_strdup("<script>renderMathInElement(document.body);</script>");
-      else
-        mathjs_render = g_strdup(" ");
+    case MATHJS_NET:
+    case MATHJS_LOCAL:
+      mathjs_render = g_strdup_printf (
+        "<script>document.querySelectorAll('pre > code.language-math, pre > code.language-tex, pre > code.language-latex')"
+        ".forEach(code=>{const math=document.createElement('div');math.className='marker-math-block';"
+        "math.textContent='$$\\n'+code.textContent+'\\n$$';code.parentElement.replaceWith(math);});%s</script>",
+        backend == KATEX ? "renderMathInElement(document.body);" :
+                          "if(window.MathJax?.Hub)MathJax.Hub.Queue(['Typeset',MathJax.Hub]);");
       break;
   }
 
   switch(highlight_mode)
   {
+    default:
     case HIGHLIGHT_OFF:
       highlight_render = g_strdup(" ");
       break;
-    default:
+    case HIGHLIGHT_NET:
+    case HIGHLIGHT_LOCAL:
       highlight_render = g_strdup("<script>hljs.initHighlightingOnLoad();</script>");
       break;
   }
 
   switch(mermaid_mode)
   {
+    default:
     case MERMAID_OFF:
       mermaid_render = g_strdup(" ");
       break;
-    default:
-      mermaid_render = g_strdup("<script>mermaid.initialize({startOnLoad:true});</script>");
+    case MERMAID_NET:
+    case MERMAID_LOCAL:
+      mermaid_render = g_strdup("<script>mermaid.initialize({startOnLoad:false,layout:'dagre',theme:'default',look:'classic'});window.markerMermaidReady=mermaid.run();</script>");
       break;
   }
 
-  char* buffer = g_strdup_printf("%s\n%s\n%s\n", mathjs_render, highlight_render, mermaid_render);
+  char* buffer = g_strdup_printf("%s\n%s\n%s\n"
+    "<script>window.markerRenderingReady=Promise.all([document.fonts.ready,"
+    "window.markerMermaidReady||Promise.resolve(),new Promise(resolve=>{"
+    "if(window.MathJax?.Hub)MathJax.Hub.Queue(resolve);else resolve();})]);</script>\n",
+    mathjs_render, highlight_render, mermaid_render);
   g_free(highlight_render);
   g_free(mathjs_render);
   g_free(mermaid_render);
@@ -214,71 +221,6 @@ localization get_local()
   return local;
 }
 
-char* 
-marker_markdown_css(const char* css_link)
-{
-  if (!css_link){
-    return "";
-  }
-  if (g_strcmp0(css_link, buffer_.location) == 0) {
-    return buffer_.css;
-  } 
-  if (buffer_.location) {
-    free(buffer_.location);
-    free(buffer_.css);
-  }
-  buffer_.location = g_strdup(css_link);
-  buffer_.css = NULL;
-  FILE* fp = NULL;
-  gchar * path = g_strdup_printf("%s%s", STYLES_DIR, css_link);
-  fp = fopen(path, "r");
-  g_free(path);
-  
-  if (fp)
-  {
-    
-    fseek(fp , 0 , SEEK_END);
-    long size = ftell(fp);
-    rewind(fp);
-
-    buffer_.css = (char*) malloc(sizeof(char) * size);
-    fread(buffer_.css, 1, size, fp);
-
-    fclose(fp);
-  }
-
-  return buffer_.css;
-}
-
-char* 
-marker_markdown_scidown_css()
-{
-  if (buffer_.scidown != 0) {
-    return buffer_.scidown;
-  }
-
-  buffer_.scidown = NULL;
-  FILE* fp = NULL;
-  gchar * path = g_strdup_printf("%s%s", STYLES_DIR, "scidown.css");
-  fp = fopen(path, "r");
-  g_free(path);
-  
-  if (fp)
-  {
-    
-    fseek(fp , 0 , SEEK_END);
-    long size = ftell(fp);
-    rewind(fp);
-
-    buffer_.scidown = (char*) malloc(sizeof(char) * size);
-    fread(buffer_.scidown, 1, size, fp);
-
-    fclose(fp);
-  }
-
-  return buffer_.scidown;
-}
-
 char*
 marker_markdown_to_html(const char*         markdown,
                         size_t              size,
@@ -287,6 +229,7 @@ marker_markdown_to_html(const char*         markdown,
                         MarkerHighlightMode highlight_mode,
                         MarkerMermaidMode   mermaid_mode,
                         const char*         stylesheet_location,
+                        const char*         notebook_folder,
                         int                 cursor_position)
 {
   char* html = NULL;
@@ -300,10 +243,10 @@ marker_markdown_to_html(const char*         markdown,
 
   char * header = html_header(katex_mode, highlight_mode, mermaid_mode);
 
-  char * ref;
-  ref = header;
-  header = g_strdup_printf("%s<style>\n%s\n%s\n</style>\n", header, marker_markdown_css(stylesheet_location), marker_markdown_scidown_css());
-  free(ref);
+  g_autofree char *styles = marker_render_style_build (stylesheet_location, notebook_folder, base_folder);
+  char *scripts = header;
+  header = g_strconcat (styles, scripts, NULL);
+  g_free (scripts);
 
   char * footer = html_footer(katex_mode, highlight_mode, mermaid_mode);
 
@@ -330,86 +273,6 @@ marker_markdown_to_html(const char*         markdown,
   hoedown_html_renderer_free(renderer);
   hoedown_document_free(document);
   hoedown_buffer_free(buffer);
-
-  return html;
-}
-
-char*
-marker_markdown_to_html_with_css_inline(const char*         markdown,
-                                        size_t              size,
-                                        char *              base_folder,
-                                        MarkerMathJSMode     katex_mode,
-                                        MarkerHighlightMode highlight_mode,
-                                        MarkerMermaidMode   mermaid_mode,
-                                        const char*         stylesheet_location,
-                                        int                 cursor_position)
-{
-  char* html = NULL;
-
-
-  char* inline_css = marker_markdown_css(stylesheet_location);
-
-  hoedown_renderer* renderer;
-  hoedown_document* document;
-  hoedown_buffer* buffer;
-  scidown_render_flags html_mode = get_render_mode(mermaid_mode);
-
-  renderer = hoedown_html_renderer_new(html_mode, 0, get_local());
-
-  char * header = html_header(katex_mode, highlight_mode, mermaid_mode);
-
-  char* common_css = marker_markdown_scidown_css();
-
-
-  if(inline_css && common_css) {
-    char * old = header;
-    header = g_strdup_printf("%s<style>\n%s\n%s\n</style>\n", header, inline_css, common_css);
-    free(old);
-    free(common_css);
-    free(inline_css);
-    inline_css = NULL;
-    common_css = NULL;
-  } else if (inline_css) {
-    char * old = header;
-    header = g_strdup_printf("%s<style>\n%s\n</style>\n", header, inline_css);
-    free(old);
-    free(inline_css);
-    inline_css = NULL;
-    common_css = NULL;
-  } else if (common_css) {
-    char * old = header;
-    header = g_strdup_printf("%s<style>\n%s\n</style>\n", header, common_css);
-    free(old);
-    free(common_css);
-    inline_css = NULL;
-    common_css = NULL;
-  }
-
-
-  char * footer = html_footer(katex_mode, highlight_mode, mermaid_mode);
-
-  ext_definition def = {header, footer};
-  document = hoedown_document_new(renderer,
-                                  HOEDOWN_EXT_BLOCK         |
-                                  HOEDOWN_EXT_SPAN          |
-                                  HOEDOWN_EXT_FLAGS,
-                                  &def,
-                                  base_folder,
-                                  16);
-
-  buffer = hoedown_buffer_new(500);
-  hoedown_document_render(document, buffer, (uint8_t*) markdown, size, cursor_position);
-
-  g_free(footer);
-  g_free(header);
-
-  const char* buf_cstr = hoedown_buffer_cstr(buffer);
-  html = strdup(buf_cstr);
-
-  hoedown_html_renderer_free(renderer);
-  hoedown_document_free(document);
-  hoedown_buffer_free(buffer);
-
 
   return html;
 }
@@ -455,60 +318,6 @@ marker_markdown_to_latex(const char*         markdown,
   return latex;
 }
 
-
-void
-marker_markdown_to_html_file(const char*         markdown,
-                             size_t              size,
-                             char               *base_folder,
-                             MarkerMathJSMode     katex_mode,
-                             MarkerHighlightMode highlight_mode,
-                             MarkerMermaidMode   mermaid_mode,
-                             const char*         stylesheet_location,
-                             const char*         filepath)
-{
-  char* html = marker_markdown_to_html(markdown,
-                                       size,
-                                       base_folder,
-                                       katex_mode,
-                                       highlight_mode,
-                                       mermaid_mode,
-                                       stylesheet_location, 
-                                       -1);
-  FILE* fp = fopen(filepath, "w");
-  if (fp && html)
-  {
-    fputs(html, fp);
-    fclose(fp);
-  }
-  free(html);
-}
-
-void
-marker_markdown_to_html_file_with_css_inline(const char*         markdown,
-                                             size_t              size,
-                                             char               *base_folder,
-                                             MarkerMathJSMode     katex_mode,
-                                             MarkerHighlightMode highlight_mode,
-                                             MarkerMermaidMode   mermaid_mode,
-                                             const char*         stylesheet_location,
-                                             const char*         filepath)
-{
-  char* html = marker_markdown_to_html_with_css_inline(markdown,
-                                                       size,
-                                                       base_folder,
-                                                       katex_mode,
-                                                       highlight_mode,
-                                                       mermaid_mode,
-                                                       stylesheet_location, 
-                                                       -1);
-  FILE* fp = fopen(filepath, "w");
-  if (fp && html)
-  {
-    fputs(html, fp);
-    fclose(fp);
-  }
-  free(html);
-}
 
 void
 marker_markdown_to_latex_file(const char*         markdown,

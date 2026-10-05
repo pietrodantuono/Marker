@@ -1,0 +1,71 @@
+/* Keep the selected preview layout and adapt its colors to the dark GTK theme.
+ * Shared author preferences apply while the application uses dark appearance. */
+  html, body {
+    color-scheme: dark;
+    color: #deddda;
+    background: #1d1d1d;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: inherit;
+    background-color: transparent;
+    border-color: #5e5c64;
+  }
+
+  a, a:visited {
+    color: #99c1f1;
+    background-color: transparent;
+  }
+
+  blockquote {
+    color: #c0bfbc;
+    background-color: transparent;
+    border-color: #5e5c64;
+  }
+
+  table, th, td, pre, code {
+    border-color: #5e5c64;
+  }
+
+  th, td, tr {
+    color: inherit;
+    background-color: transparent;
+  }
+
+  tr:nth-child(even), pre, code, .hljs {
+    color: #deddda;
+    background-color: #242424;
+  }
+
+  hr {
+    border-color: #5e5c64;
+    background-color: #5e5c64;
+  }
+
+  /* Highlight.js token colors stay readable on the dark code surface. */
+  .hljs-comment, .hljs-quote {
+    color: #9a9996;
+  }
+
+  .hljs-keyword, .hljs-selector-tag, .hljs-doctag, .hljs-formula {
+    color: #dc8add;
+  }
+
+  .hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute,
+  .hljs-meta-string {
+    color: #8ff0a4;
+  }
+
+  .hljs-number, .hljs-literal, .hljs-type, .hljs-built_in,
+  .hljs-attr, .hljs-variable, .hljs-template-variable {
+    color: #f8e45c;
+  }
+
+  .hljs-title, .hljs-section, .hljs-name, .hljs-symbol,
+  .hljs-bullet, .hljs-link, .hljs-meta, .hljs-selector-id {
+    color: #99c1f1;
+  }
+
+  .hljs-deletion, .hljs-subst {
+    color: #f66151;
+  }
