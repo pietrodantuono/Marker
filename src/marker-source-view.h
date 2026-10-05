@@ -23,6 +23,7 @@
 #define __MARKER_SOURCE_VIEW_H__
 
 #include <gtksourceview/gtksource.h>
+#include "marker-markdown-structure.h"
 
 G_BEGIN_DECLS
 
@@ -35,8 +36,7 @@ void                     marker_source_view_apply_font              (MarkerSourc
 gboolean                 marker_source_view_get_modified             (MarkerSourceView   *source_view);
 void                     marker_source_view_set_modified             (MarkerSourceView   *source_view,
                                                                       gboolean            modified);
-gchar                   *marker_source_view_get_text                 (MarkerSourceView   *source_view,
-                                                                      gboolean            include_position);
+gchar                   *marker_source_view_get_text                 (MarkerSourceView   *source_view);
 void                     marker_source_view_set_text                 (MarkerSourceView   *source_view,
                                                                       const char         *text,
                                                                       size_t              size);
@@ -47,13 +47,20 @@ void                     marker_source_view_set_syntax_theme         (MarkerSour
 void                     marker_source_view_surround_selection_with  (MarkerSourceView   *source_view,
                                                                       const char         *insertion);
 void                     marker_source_view_insert_link              (MarkerSourceView   *source_view);
-void                     marker_source_view_insert_image             (MarkerSourceView   *source_view,
-                                                                      const char         *image_path);
 void                     marker_source_view_set_spell_check          (MarkerSourceView   *source_view,
                                                                       gboolean            state);
 void                     marker_source_view_set_spell_check_lang     (MarkerSourceView   *source_view,
                                                                       const gchar        *lang);
 int                      marker_source_view_get_cursor_position      (MarkerSourceView   *source_view);
+void                     marker_source_view_set_formatted            (MarkerSourceView   *source_view,
+                                                                      gboolean            formatted);
+void                     marker_source_view_set_writing_width        (MarkerSourceView   *source_view,
+                                                                      guint               width);
+void                     marker_source_view_reapply_formatted        (MarkerSourceView   *source_view);
+const MarkerMarkdownStructure *marker_source_view_get_structure      (MarkerSourceView   *source_view);
+void                     marker_source_view_set_heading_level        (MarkerSourceView   *source_view,
+                                                                      guint               line,
+                                                                      guint               level);
 
 GtkSourceSearchContext  *marker_source_get_search_context            (MarkerSourceView   *source_view);
 

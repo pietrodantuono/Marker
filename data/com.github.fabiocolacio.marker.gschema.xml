@@ -5,6 +5,7 @@
     <value nick="preview-only" value="1"/>
     <value nick="dual-pane" value="2"/>
     <value nick="dual-window" value="3"/>
+    <value nick="formatted" value="4"/>
   </enum>
 
   <enum id="com.github.fabiocolacio.marker.MathJS">
@@ -91,6 +92,27 @@
       <description>Auto-indent code in the editor.</description>
     </key>
 
+    <key name="writing-width" type="u">
+      <default>640</default>
+      <summary>Formatted Markdown writing width</summary>
+      <description>The maximum logical width of the centered writing area.</description>
+    </key>
+
+    <key name="prose-font" type="s">
+      <default>'Monospace 11'</default>
+      <summary>Formatted Markdown prose font</summary>
+    </key>
+
+    <key name="code-font" type="s">
+      <default>'Monospace 11'</default>
+      <summary>Formatted Markdown code font</summary>
+    </key>
+
+    <key name="line-spacing" type="u">
+      <default>4</default>
+      <summary>Formatted Markdown line spacing</summary>
+    </key>
+
     <key name="spell-check" type="b">
       <default>false</default>
       <summary>Spell Check</summary>
@@ -112,7 +134,7 @@
     </key>
 
     <key name="css-toggle" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Enable CSS theme in Preview</summary>
       <description>Use a CSS theme in the live preview</description>
     </key>
@@ -217,12 +239,12 @@
     </key>
 
     <key name="window-width" type="u">
-      <default>900</default>
+      <default>1200</default>
       <summary>Window width</summary>
     </key>
 
     <key name="window-height" type="u">
-      <default>600</default>
+      <default>800</default>
       <summary>Window height</summary>
     </key>
 
@@ -237,8 +259,24 @@
     </key>
 
     <key name="show-sidebar" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Whether the sidebar is shown</summary>
+    </key>
+
+    <key name="profile-initialized" type="b">
+      <default>false</default>
+      <summary>Whether defaults for this profile have been initialized</summary>
+    </key>
+
+    <key name="focus-mode" type="b">
+      <default>false</default>
+      <summary>Whether focus mode is enabled</summary>
+    </key>
+
+    <key name="sidebar-sort" type="s">
+      <default>'name'</default>
+      <summary>Project sidebar sort order</summary>
+      <description>Sort files by name or modification time.</description>
     </key>
   </schema>
 </schemalist>

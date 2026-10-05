@@ -22,7 +22,7 @@
 #ifndef __MARKER_PREVIEW_H__
 #define __MARKER_PREVIEW_H__
 
-#include <webkit2/webkit2.h>
+#include <webkit/webkit.h>
 #include "scidown/src/constants.h"
 
 
@@ -33,8 +33,6 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE (MarkerPreview, marker_preview, MARKER, PREVIEW, WebKitWebView)
 
 MarkerPreview       *marker_preview_new                          (void);
-void                 marker_preview_set_zoom_level               (MarkerPreview      *preview,
-                                                                  gdouble             zoom_level);
 void                 marker_preview_zoom_out                     (MarkerPreview      *preview);
 void                 marker_preview_zoom_original                (MarkerPreview      *preview);
 void                 marker_preview_zoom_in                      (MarkerPreview      *preview);
@@ -42,11 +40,14 @@ void                 marker_preview_render_markdown              (MarkerPreview 
                                                                   const char         *markdown,
                                                                   const char         *css_theme,
                                                                   const char         *base_uri,
-                                                                  int  		        cursor);
+                                                                  const char         *notebook_folder,
+                                                                  int                 cursor);
 gboolean             marker_preview_export_html                 (const gchar        *staging_html,
                                                                   const gchar        *final_html,
                                                                   const gchar        *document_path,
                                                                   const gchar        *outfile,
+                                                                  GError            **error);
+gboolean             marker_preview_wait_ready                  (MarkerPreview      *preview,
                                                                   GError            **error);
 
 WebKitPrintOperationResponse                 
@@ -62,6 +63,7 @@ void                 marker_preview_scroll_up                    (MarkerPreview 
 void                 marker_preview_scroll_down                  (MarkerPreview      *preview);
 void                 marker_preview_scroll_to_top                (MarkerPreview      *preview);
 void                 marker_preview_scroll_to_bottom             (MarkerPreview      *preview);
+void                 marker_preview_scroll_to_cursor             (MarkerPreview      *preview);
 
 G_END_DECLS
 

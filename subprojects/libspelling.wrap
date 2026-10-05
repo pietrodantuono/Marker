@@ -1,0 +1,7 @@
+[wrap-git]
+url = https://gitlab.gnome.org/GNOME/libspelling.git
+revision = 1facdde8e1c0fd72bed806f9a9be2fbec83af5f2
+depth = 1
+
+[provide]
+dependency_names = libspelling-1

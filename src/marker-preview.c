@@ -28,10 +28,10 @@
 #include <time.h>
 
 #include "marker-gnuplot.h"
+#include "marker-markdown-structure.h"
 #include "marker-markdown.h"
 #include "marker-prefs.h"
 
-#include "marker-string.h"
 
 #include "marker-preview.h"
 #include "marker.h"
@@ -47,9 +47,6 @@
 #define GNUPLOT_DATA_HANDLER "markerGnuplotData"
 #define GNUPLOT_DONE_HANDLER "markerGnuplotDone"
 
-#define min(a, b) ((a < b) ? a : b)
-#define max(a, b) ((a < b) ? b : a)
-
 struct _MarkerPreview
 {
   WebKitWebView parent_instance;
@@ -62,17 +59,32 @@ struct _MarkerPreview
   gboolean    gnuplot_available;
   gboolean    gnuplot_pending;
   gboolean    manual_gnuplot;
+  gboolean    scroll_requested;
+  gboolean    load_pending;
+  gboolean    rendered;
+  guint       render_serial;
 };
 
 G_DEFINE_TYPE(MarkerPreview, marker_preview, WEBKIT_TYPE_WEB_VIEW)
 
 enum {
   GNUPLOT_DATA_CHANGED,
-  GNUPLOT_RENDER_COMPLETE,
+  RENDER_COMPLETE,
   LAST_SIGNAL
 };
 
 static guint preview_signals[LAST_SIGNAL];
+
+static void
+finish_render (MarkerPreview *preview)
+{
+  if (preview->load_pending || preview->gnuplot_pending || preview->rendered)
+    return;
+  preview->rendered = TRUE;
+  if (preview->scroll_requested)
+    marker_preview_scroll_to_cursor (preview);
+  g_signal_emit (preview, preview_signals[RENDER_COMPLETE], 0);
+}
 
 static void
 gnuplot_scheme_request_cb (WebKitURISchemeRequest *request,
@@ -214,7 +226,7 @@ finish_gnuplot_render (MarkerPreview *preview)
     return;
 
   preview->gnuplot_pending = FALSE;
-  g_signal_emit (preview, preview_signals[GNUPLOT_RENDER_COMPLETE], 0);
+  finish_render (preview);
 }
 
 static gboolean
@@ -230,12 +242,19 @@ gnuplot_data_message_cb (WebKitUserContentManager *manager,
   g_autoptr (GFile) file = NULL;
   g_autoptr (GError) error = NULL;
 
-  if (!jsc_value_is_string (value)) {
+  if (!jsc_value_is_object (value))
+    {
+      webkit_script_message_reply_return_error_message (reply, "Invalid plot data request.");
+      return TRUE;
+    }
+  g_autoptr (JSCValue) serial = jsc_value_object_get_property (value, "serial");
+  g_autoptr (JSCValue) path = jsc_value_object_get_property (value, "path");
+  if (!jsc_value_is_string (path) || jsc_value_to_int32 (serial) != preview->render_serial) {
     webkit_script_message_reply_return_error_message (reply, "Invalid plot data path.");
     return TRUE;
   }
 
-  operand = jsc_value_to_string (value);
+  operand = jsc_value_to_string (path);
   bytes = marker_gnuplot_load_data (preview->document_dir, operand, &file, &error);
   if (file != NULL)
     monitor_data_file (preview, file);
@@ -261,7 +280,8 @@ gnuplot_done_message_cb (WebKitUserContentManager *manager,
 {
   MarkerPreview *preview = MARKER_PREVIEW (user_data);
 
-  finish_gnuplot_render (preview);
+  if (jsc_value_to_int32 (value) == preview->render_serial)
+    finish_gnuplot_render (preview);
 
   g_autoptr (JSCValue) response =
     jsc_value_new_boolean (jsc_value_get_context (value), TRUE);
@@ -274,14 +294,17 @@ open_uri (WebKitPolicyDecision *decision) {
   WebKitNavigationPolicyDecision *nav_dec = WEBKIT_NAVIGATION_POLICY_DECISION(decision);
   WebKitNavigationAction *action = webkit_navigation_policy_decision_get_navigation_action (nav_dec);
   WebKitURIRequest *request = webkit_navigation_action_get_request (action);
-  /* Open only http requests in default browser */
-  /* FIXME: Open also other request like ftp in default browser */
-  if (webkit_uri_request_get_http_method(request) != NULL) {
-    const gchar * uri = webkit_uri_request_get_uri(request);
-    GtkApplication * app = marker_get_app();
-    GList* windows = gtk_application_get_windows(app);
-    time_t now = time(0);
-    gtk_show_uri_on_window (windows->data, uri, now, NULL);
+  const gchar *uri = webkit_uri_request_get_uri (request);
+  if (g_str_has_prefix (uri, "http://") ||
+      g_str_has_prefix (uri, "https://") ||
+      g_str_has_prefix (uri, "mailto:")) {
+    GtkApplication *app = marker_get_app ();
+    GtkUriLauncher *launcher = gtk_uri_launcher_new (uri);
+
+    gtk_uri_launcher_launch (launcher,
+                             gtk_application_get_active_window (app),
+                             NULL, NULL, NULL);
+    g_object_unref (launcher);
     webkit_policy_decision_ignore(decision);
     return TRUE;
   }
@@ -326,7 +349,6 @@ decide_policy_cb (WebKitWebView *web_view,
 static gboolean
 context_menu_cb  (WebKitWebView       *web_view,
                   WebKitContextMenu   *context_menu,
-                  GdkEvent            *event,
                   WebKitHitTestResult *hit_test_result,
                   gpointer             user_data)
 {
@@ -342,7 +364,9 @@ set_render_error (MarkerPreview *preview,
     ? g_error_copy (error)
     : g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED,
                            "Gnuplot rendering failed.");
+  preview->load_pending = FALSE;
   finish_gnuplot_render (preview);
+  finish_render (preview);
 }
 
 static void
@@ -356,7 +380,7 @@ manual_gnuplot_finished_cb (GObject      *object,
     webkit_web_view_evaluate_javascript_finish (WEBKIT_WEB_VIEW (object),
                                                 result,
                                                 &error);
-  if (value == NULL)
+  if (value == NULL && GPOINTER_TO_UINT (user_data) == preview->render_serial)
     set_render_error (preview, error);
 }
 
@@ -368,7 +392,8 @@ load_failed_cb (WebKitWebView  *web_view,
                 gpointer        user_data)
 {
   MarkerPreview *preview = MARKER_PREVIEW (web_view);
-  if (preview->gnuplot_pending)
+  if ((preview->gnuplot_pending || preview->load_pending) &&
+      !g_error_matches (error, WEBKIT_NETWORK_ERROR, WEBKIT_NETWORK_ERROR_CANCELLED))
     set_render_error (preview, error);
   return FALSE;
 }
@@ -380,7 +405,7 @@ web_process_terminated_cb (WebKitWebView                    *web_view,
 {
   MarkerPreview *preview = MARKER_PREVIEW (web_view);
 
-  if (preview->gnuplot_pending) {
+  if (preview->gnuplot_pending || preview->load_pending) {
     g_autoptr (GError) error =
       g_error_new_literal (G_IO_ERROR,
                            G_IO_ERROR_FAILED,
@@ -389,32 +414,18 @@ web_process_terminated_cb (WebKitWebView                    *web_view,
   }
 }
 
-static void
-initialize_web_extensions_cb (WebKitWebContext *context,
-                              gpointer          user_data)
+static gboolean
+key_pressed_cb (GtkEventControllerKey *controller,
+                guint                  keyval,
+                guint                  keycode,
+                GdkModifierType        state,
+                gpointer               user_data)
 {
-  /* Web Extensions get a different ID for each Web Process */
-  static guint32 unique_id = 0;
+  MarkerPreview *preview = MARKER_PREVIEW (user_data);
 
-  webkit_web_context_set_web_extensions_directory (
-     context, WEB_EXTENSIONS_DIRECTORY);
-  webkit_web_context_set_web_extensions_initialization_user_data (
-     context, g_variant_new_uint32 (unique_id++));
-}
-
-gboolean
-key_press_event_cb (GtkWidget *widget,
-                    GdkEvent  *event,
-                    gpointer   user_data)
-{
-  g_return_val_if_fail (MARKER_IS_PREVIEW (widget), FALSE);
-  MarkerPreview *preview = MARKER_PREVIEW (widget);
-
-  GdkEventKey *key_event = (GdkEventKey *) event;
-
-  if ((key_event->state & GDK_CONTROL_MASK) != 0)
+  if ((state & GDK_CONTROL_MASK) != 0)
   {
-    switch (key_event->keyval)
+    switch (keyval)
     {
       case GDK_KEY_plus:
         marker_preview_zoom_in (preview);
@@ -431,7 +442,7 @@ key_press_event_cb (GtkWidget *widget,
   }
   else
   {
-    switch (key_event->keyval)
+    switch (keyval)
     {
       case GDK_KEY_j:
         marker_preview_scroll_down (preview);
@@ -462,20 +473,17 @@ key_press_event_cb (GtkWidget *widget,
   return FALSE;
 }
 
-gboolean
-scroll_event_cb (GtkWidget *widget,
-                 GdkEvent  *event,
-                 gpointer   user_data)
+static gboolean
+scroll_cb (GtkEventControllerScroll *controller,
+           gdouble                   delta_x,
+           gdouble                   delta_y,
+           gpointer                  user_data)
 {
-  g_return_val_if_fail (MARKER_IS_PREVIEW (widget), FALSE);
-  MarkerPreview *preview = MARKER_PREVIEW (widget);
-
-  GdkEventScroll *scroll_event = (GdkEventScroll *) event;
-  guint state = scroll_event->state;
+  MarkerPreview *preview = MARKER_PREVIEW (user_data);
+  GdkModifierType state = gtk_event_controller_get_current_event_state (
+    GTK_EVENT_CONTROLLER (controller));
   if ((state & GDK_CONTROL_MASK) != 0)
   {
-    gdouble delta_y = scroll_event->delta_y;
-
     if (delta_y > 0)
     {
       marker_preview_zoom_out (preview);
@@ -487,6 +495,26 @@ scroll_event_cb (GtkWidget *widget,
   }
 
   return FALSE;
+}
+
+static void
+resources_ready (GObject *object, GAsyncResult *result, gpointer data)
+{
+  MarkerPreview *preview = MARKER_PREVIEW (object);
+  guint serial = GPOINTER_TO_UINT (data);
+  g_autoptr (GError) error = NULL;
+  g_autoptr (JSCValue) value = webkit_web_view_call_async_javascript_function_finish (WEBKIT_WEB_VIEW (object), result, &error);
+  if (serial != preview->render_serial)
+    return;
+  if (value == NULL)
+    {
+      set_render_error (preview, error);
+      return;
+    }
+  if (jsc_value_to_int32 (value) != serial)
+    return;
+  preview->load_pending = FALSE;
+  finish_render (preview);
 }
 
 static void
@@ -512,14 +540,16 @@ load_changed_cb (WebKitWebView   *web_view,
         webkit_settings_set_enable_javascript (
           webkit_web_view_get_settings (web_view), TRUE);
         if (preview->gnuplot_script != NULL) {
+          g_autofree char *script = g_strdup_printf ("globalThis.markerRenderSerial = %u;\n%s",
+                                                     preview->render_serial, preview->gnuplot_script);
           webkit_web_view_evaluate_javascript (web_view,
-                                               preview->gnuplot_script,
+                                               script,
                                                -1,
                                                GNUPLOT_WORLD,
                                                NULL,
                                                NULL,
                                                manual_gnuplot_finished_cb,
-                                               NULL);
+                                               GUINT_TO_POINTER (preview->render_serial));
         } else {
           g_autoptr (GError) error =
             g_error_new_literal (G_IO_ERROR,
@@ -528,6 +558,11 @@ load_changed_cb (WebKitWebView   *web_view,
           set_render_error (preview, error);
         }
       }
+      webkit_web_view_call_async_javascript_function (web_view,
+        "await (window.markerRenderingReady || Promise.resolve());"
+        "await document.fonts.ready;"
+        "return Number(document.querySelector('meta[name=marker-render]')?.content || 0);",
+        -1, NULL, NULL, NULL, NULL, resources_ready, GUINT_TO_POINTER (preview->render_serial));
       break;
   }
 }
@@ -570,47 +605,32 @@ scroll_js_finished_cb (GObject      *object,
                        GAsyncResult *result,
                        gpointer      user_data)
 {
-  WebKitJavascriptResult *js_result;
-  GError *error = NULL;
+  g_autoptr (JSCValue) value = NULL;
+  g_autoptr (GError) error = NULL;
 
-  js_result = webkit_web_view_run_javascript_finish (WEBKIT_WEB_VIEW (object), result, &error);
+  value = webkit_web_view_evaluate_javascript_finish (WEBKIT_WEB_VIEW (object), result, &error);
   if (error != NULL) {
-    g_print ("Error running scroll script: %s", error->message);
-    g_error_free (error);
+    g_debug ("Error running preview script: %s", error->message);
     return;
-  } 
-
-  webkit_javascript_result_unref (js_result);
+  }
 }
 
-void
-marker_preview_set_zoom_level (MarkerPreview *preview,
-                               gdouble        zoom_level)
-{
-  g_return_if_fail (MARKER_IS_PREVIEW (preview));
-  webkit_web_view_set_zoom_level (WEBKIT_WEB_VIEW (preview), zoom_level);
-  g_signal_emit_by_name (preview, "zoom-changed");
-}
 
 static void
 marker_preview_init (MarkerPreview *preview)
 {
-  static gsize web_extensions_connected = 0;
-
-  if (g_once_init_enter (&web_extensions_connected)) {
-    g_signal_connect (webkit_web_context_get_default (),
-                      "initialize-web-extensions",
-                      G_CALLBACK (initialize_web_extensions_cb),
-                      NULL);
-    g_once_init_leave (&web_extensions_connected, 1);
-  }
+  GtkEventController *key_controller = gtk_event_controller_key_new ();
+  GtkEventController *scroll_controller =
+    gtk_event_controller_scroll_new (GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
 
   preview->data_monitors = g_hash_table_new_full (g_str_hash,
                                                    g_str_equal,
                                                    g_free,
                                                    data_monitor_free);
-  g_signal_connect (preview, "scroll-event", G_CALLBACK (scroll_event_cb), NULL);
-  g_signal_connect (preview, "key-press-event", G_CALLBACK (key_press_event_cb), NULL);
+  g_signal_connect (key_controller, "key-pressed", G_CALLBACK (key_pressed_cb), preview);
+  g_signal_connect (scroll_controller, "scroll", G_CALLBACK (scroll_cb), preview);
+  gtk_widget_add_controller (GTK_WIDGET (preview), key_controller);
+  gtk_widget_add_controller (GTK_WIDGET (preview), scroll_controller);
   g_signal_connect (preview, "decide-policy", G_CALLBACK (decide_policy_cb), NULL);
   g_signal_connect (preview, "context-menu", G_CALLBACK (context_menu_cb), NULL);
   g_signal_connect (preview, "load-failed", G_CALLBACK (load_failed_cb), NULL);
@@ -655,11 +675,6 @@ marker_preview_class_init (MarkerPreviewClass *class)
   object_class->dispose = marker_preview_dispose;
   object_class->finalize = marker_preview_finalize;
 
-  g_signal_newv ("zoom-changed",
-                 G_TYPE_FROM_CLASS (class),
-                 G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE,
-                 NULL, NULL, NULL, NULL,
-                 G_TYPE_NONE, 0, NULL);
 
   preview_signals[GNUPLOT_DATA_CHANGED] =
     g_signal_new ("gnuplot-data-changed",
@@ -667,12 +682,8 @@ marker_preview_class_init (MarkerPreviewClass *class)
                   G_SIGNAL_RUN_LAST,
                   0, NULL, NULL, NULL,
                   G_TYPE_NONE, 0);
-  preview_signals[GNUPLOT_RENDER_COMPLETE] =
-    g_signal_new ("gnuplot-render-complete",
-                  G_TYPE_FROM_CLASS (class),
-                  G_SIGNAL_RUN_LAST,
-                  0, NULL, NULL, NULL,
-                  G_TYPE_NONE, 0);
+  preview_signals[RENDER_COMPLETE] = g_signal_new ("render-complete", G_TYPE_FROM_CLASS (class),
+    G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 
 
   WEBKIT_WEB_VIEW_CLASS(class)->load_changed = load_changed_cb;
@@ -682,30 +693,14 @@ MarkerPreview*
 marker_preview_new(void)
 {
   g_autoptr (WebKitUserContentManager) manager = NULL;
-  g_autoptr (GBytes) dark_css = NULL;
   g_autofree gchar *script_path = NULL;
   MarkerPreview *obj;
 
   register_gnuplot_scheme ();
   manager = webkit_user_content_manager_new ();
-  dark_css = g_resources_lookup_data (
-    "/com/github/fabiocolacio/marker/styles/marker-preview-dark.css",
-    G_RESOURCE_LOOKUP_FLAGS_NONE, NULL);
-  WebKitUserStyleSheet *dark_style = webkit_user_style_sheet_new (
-    g_bytes_get_data (dark_css, NULL),
-    WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_STYLE_LEVEL_USER,
-    NULL, NULL);
-  webkit_user_content_manager_add_style_sheet (manager, dark_style);
-  webkit_user_style_sheet_unref (dark_style);
   obj = g_object_new (MARKER_TYPE_PREVIEW,
                       "user-content-manager", manager,
                       NULL);
-
-  /* ponytail: software compositing avoids WebKitGTK/GTK 3 popover artifacts;
-   * revisit GPU compositing when its clipping works with overlapping menus. */
-  webkit_settings_set_hardware_acceleration_policy (
-    webkit_web_view_get_settings (WEBKIT_WEB_VIEW (obj)),
-    WEBKIT_HARDWARE_ACCELERATION_POLICY_NEVER);
 
   script_path = g_build_filename (SCRIPTS_DIR,
                                   "gnuplot",
@@ -730,7 +725,7 @@ marker_preview_new(void)
                            obj,
                            0);
 
-  webkit_web_view_set_zoom_level (WEBKIT_WEB_VIEW (obj), makrer_prefs_get_zoom_level ());
+  webkit_web_view_set_zoom_level (WEBKIT_WEB_VIEW (obj), marker_prefs_get_zoom_level ());
   
 
   /***
@@ -749,12 +744,11 @@ marker_preview_zoom_out (MarkerPreview *preview)
   WebKitWebView *view = WEBKIT_WEB_VIEW (preview);
 
   gdouble val = webkit_web_view_get_zoom_level (view) - 0.1;
-  val = max (val, MIN_ZOOM);
+  val = MAX (val, MIN_ZOOM);
 
   marker_prefs_set_zoom_level(val);
   webkit_web_view_set_zoom_level(view, val);
 
-  g_signal_emit_by_name (preview, "zoom-changed");
 }
 
 void
@@ -768,7 +762,6 @@ marker_preview_zoom_original (MarkerPreview *preview)
   marker_prefs_set_zoom_level (zoom);
   webkit_web_view_set_zoom_level (view, zoom);
 
-  g_signal_emit_by_name (preview, "zoom-changed");
 }
 
 void
@@ -778,67 +771,11 @@ marker_preview_zoom_in (MarkerPreview *preview)
   WebKitWebView *view = WEBKIT_WEB_VIEW (preview);
 
   gdouble val = webkit_web_view_get_zoom_level (view) + 0.1;
-  val = min (val, MAX_ZOOM);
+  val = MIN (val, MAX_ZOOM);
 
   marker_prefs_set_zoom_level(val);
   webkit_web_view_set_zoom_level(view, val);
 
-  g_signal_emit_by_name (preview, "zoom-changed");
-}
-
-static void
-add_preview_style (WebKitUserContentManager *manager, const gchar *css)
-{
-  g_autoptr (WebKitUserStyleSheet) style = webkit_user_style_sheet_new (
-    css, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_STYLE_LEVEL_USER, NULL, NULL);
-  webkit_user_content_manager_add_style_sheet (manager, style);
-}
-
-static void
-apply_preview_fonts (WebKitUserContentManager *manager)
-{
-  const gchar *roles[] = {"header", "math", "code", "text"};
-  const gchar *selectors[] = {
-    "h1, h2, h3, h4, h5, h6",
-    ".katex, .MathJax, .MathJax_Display, .MathJax_SVG, math",
-    "pre, code, pre code, pre code *",
-    "body, p, blockquote, li, td, th"
-  };
-  g_autoptr (GString) css = g_string_new ("@media screen {\n");
-  for (guint i = 0; i < G_N_ELEMENTS (roles); i++) {
-    g_autofree gchar *chosen = marker_prefs_get_preview_font (roles[i]);
-    if (chosen == NULL || *chosen == '\0')
-      continue;
-    g_autoptr (PangoFontDescription) font = pango_font_description_from_string (chosen);
-    const gchar *family = pango_font_description_get_family (font);
-    if (family == NULL)
-      continue;
-    g_autoptr (GString) quoted = g_string_new (NULL);
-    for (const gchar *p = family; *p; p++) {
-      if (*p == '"' || *p == '\\')
-        g_string_append_c (quoted, '\\');
-      g_string_append_c (quoted, *p == '\n' || *p == '\r' ? ' ' : *p);
-    }
-    gdouble size = (gdouble) pango_font_description_get_size (font) / PANGO_SCALE;
-    const gchar *unit = pango_font_description_get_size_is_absolute (font) ? "px" : "pt";
-    PangoStyle slant = pango_font_description_get_style (font);
-    g_string_append_printf (css,
-      "%s {font-family: \"%s\" !important; font-weight: %d !important; font-style: %s !important;",
-      selectors[i], quoted->str, pango_font_description_get_weight (font),
-      slant == PANGO_STYLE_ITALIC ? "italic" : slant == PANGO_STYLE_OBLIQUE ? "oblique" : "normal");
-    if (size > 0)
-    {
-      gchar size_css[G_ASCII_DTOSTR_BUF_SIZE];
-      g_ascii_dtostr (size_css, sizeof size_css, size);
-      g_string_append_printf (css, "font-size: %s%s !important;", size_css, unit);
-    }
-    g_string_append (css, "}\n");
-    if (g_str_equal (roles[i], "math"))
-      g_string_append_printf (css,
-        ".katex *, .MathJax * {font-family: \"%s\" !important;}\n", quoted->str);
-  }
-  g_string_append (css, "}\n");
-  add_preview_style (manager, css->str);
 }
 
 static void
@@ -850,18 +787,24 @@ marker_preview_load_html (MarkerPreview *preview,
   g_autofree gchar *uri = NULL;
   WebKitUserContentManager *manager = webkit_web_view_get_user_content_manager (WEBKIT_WEB_VIEW (preview));
   gboolean gnuplot_enabled = marker_prefs_get_use_gnuplot () && preview->gnuplot_available;
+  preview->render_serial++;
+  preview->load_pending = TRUE;
+  preview->rendered = FALSE;
   webkit_user_content_manager_remove_all_scripts (manager);
+  g_autofree char *serial_script = g_strdup_printf ("globalThis.markerRenderSerial = %u;", preview->render_serial);
+  g_autoptr (WebKitUserScript) serial = webkit_user_script_new_for_world (
+    serial_script, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
+    GNUPLOT_WORLD, NULL, NULL);
+  webkit_user_content_manager_add_script (manager, serial);
   if (gnuplot_enabled && !manual_gnuplot) {
     g_autoptr (WebKitUserScript) script = webkit_user_script_new_for_world (
       preview->gnuplot_script, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
       WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END, GNUPLOT_WORLD, NULL, NULL);
     webkit_user_content_manager_add_script (manager, script);
   }
-  webkit_user_content_manager_remove_all_style_sheets (manager);
-  g_autoptr (GBytes) dark_css = g_resources_lookup_data (
-    "/com/github/fabiocolacio/marker/styles/marker-preview-dark.css", G_RESOURCE_LOOKUP_FLAGS_NONE, NULL);
-  add_preview_style (manager, g_bytes_get_data (dark_css, NULL));
-  apply_preview_fonts (manager);
+  GdkRGBA background;
+  gdk_rgba_parse (&background, marker_prefs_get_use_dark_theme () ? "#1d1d1d" : "#ffffff");
+  webkit_web_view_set_background_color (WEBKIT_WEB_VIEW (preview), &background);
 
   if (preview->data_change_source != 0) {
     g_source_remove (preview->data_change_source);
@@ -873,8 +816,9 @@ marker_preview_load_html (MarkerPreview *preview,
   preview->document_dir = document_path != NULL
     ? g_path_get_dirname (document_path)
     : NULL;
-  preview->gnuplot_pending = gnuplot_enabled;
+  preview->gnuplot_pending = gnuplot_enabled && strstr (html, "language-gnuplot") != NULL;
   preview->manual_gnuplot = manual_gnuplot && gnuplot_enabled;
+  preview->scroll_requested = TRUE;
 
   webkit_settings_set_enable_javascript (
     webkit_web_view_get_settings (WEBKIT_WEB_VIEW (preview)),
@@ -885,7 +829,10 @@ marker_preview_load_html (MarkerPreview *preview,
   if (uri == NULL)
     uri = g_filename_to_uri (g_get_home_dir (), NULL, NULL);
 
-  webkit_web_view_load_html (WEBKIT_WEB_VIEW (preview), html, uri);
+  g_autofree char *render_marker = g_strdup_printf ("<meta name=\"marker-render\" content=\"%u\"></head>", preview->render_serial);
+  g_autoptr (GString) content = g_string_new (html);
+  g_string_replace (content, "</head>", render_marker, 1);
+  webkit_web_view_load_html (WEBKIT_WEB_VIEW (preview), content->str, uri);
 }
 
 void
@@ -893,6 +840,7 @@ marker_preview_render_markdown(MarkerPreview* preview,
                                const char*    markdown,
                                const char*    css_theme,
                                const char*    base_uri,
+                               const char*    notebook_folder,
                                int            cursor)
 {
   MarkerMathJSMode katex_mode = MATHJS_OFF;
@@ -911,15 +859,19 @@ marker_preview_render_markdown(MarkerPreview* preview,
 
   g_autofree char *base_folder = NULL;
   if (base_uri)
-    base_folder = marker_string_filename_get_path(base_uri);
-  char* html = marker_markdown_to_html(markdown,
-                                       strlen(markdown),
+    base_folder = g_path_get_dirname (base_uri);
+  else
+    base_folder = g_strdup (notebook_folder != NULL ? notebook_folder : g_get_home_dir ());
+  g_autofree char *anchored = cursor >= 0 ? marker_markdown_structure_cursor_source (markdown, cursor) : g_strdup (markdown);
+  char* html = marker_markdown_to_html(anchored,
+                                       strlen(anchored),
                                        base_folder,
                                        katex_mode,
                                        highlight_mode,
                                        mermaid_mode,
                                        css_theme,
-                                       cursor);
+                                       notebook_folder,
+                                       -1);
 
   marker_preview_load_html (preview, html, base_uri, FALSE);
   free(html);
@@ -933,17 +885,30 @@ render_complete_quit_cb (MarkerPreview *preview,
 }
 
 static gboolean
-marker_preview_wait_for_gnuplot (MarkerPreview *preview,
+ready_timeout (gpointer data)
+{
+  MarkerPreview *preview = MARKER_PREVIEW (data);
+  g_autoptr (GError) error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
+    "The preview did not finish rendering within 30 seconds.");
+  set_render_error (preview, error);
+  return G_SOURCE_REMOVE;
+}
+
+gboolean
+marker_preview_wait_ready (MarkerPreview *preview,
                                  GError       **error)
 {
-  if (preview->gnuplot_pending) {
+  if (preview->gnuplot_pending || preview->load_pending) {
     g_autoptr (GMainLoop) loop = g_main_loop_new (NULL, FALSE);
     gulong handler = g_signal_connect (preview,
-                                       "gnuplot-render-complete",
+                                       "render-complete",
                                        G_CALLBACK (render_complete_quit_cb),
                                        loop);
-    if (preview->gnuplot_pending)
+    guint timeout = g_timeout_add_seconds (30, ready_timeout, preview);
+    if (preview->gnuplot_pending || preview->load_pending)
       g_main_loop_run (loop);
+    if (g_main_context_find_source_by_id (NULL, timeout) != NULL)
+      g_source_remove (timeout);
     g_signal_handler_disconnect (preview, handler);
   }
 
@@ -1000,7 +965,7 @@ marker_preview_export_html (const gchar  *staging_html,
   }
 
   marker_preview_load_html (preview, staging_html, document_path, TRUE);
-  if (!marker_preview_wait_for_gnuplot (preview, error))
+  if (!marker_preview_wait_ready (preview, error))
     return FALSE;
 
   encoded = g_base64_encode ((const guchar *) final_html, strlen (final_html));
@@ -1051,7 +1016,7 @@ marker_preview_run_print_dialog(MarkerPreview* preview,
   WebKitPrintOperationResponse response;
   WebKitPrintOperation* print_op;
 
-  if (!marker_preview_wait_for_gnuplot (preview, &error)) {
+  if (!marker_preview_wait_ready (preview, &error)) {
     g_warning ("Unable to finish gnuplot preview before printing: %s", error->message);
     return WEBKIT_PRINT_OPERATION_RESPONSE_CANCEL;
   }
@@ -1082,7 +1047,7 @@ marker_preview_print_pdf(MarkerPreview*     preview,
   GtkPaperSize *gtk_paper_size;
   PrintWait wait = {0};
 
-  if (!marker_preview_wait_for_gnuplot (preview, &error)) {
+  if (!marker_preview_wait_ready (preview, &error)) {
     g_warning ("Unable to finish gnuplot preview before PDF export: %s", error->message);
     return FALSE;
   }
@@ -1106,7 +1071,7 @@ marker_preview_print_pdf(MarkerPreview*     preview,
   gtk_print_settings_set (print_settings, GTK_PRINT_SETTINGS_OUTPUT_FILE_FORMAT, "pdf");
   gtk_print_settings_set (print_settings, GTK_PRINT_SETTINGS_OUTPUT_URI, uri);
   gtk_print_settings_set (print_settings, GTK_PRINT_SETTINGS_PRINTER,
-                          dgettext ("gtk30", "Print to File"));
+                          dgettext ("gtk40", "Print to File"));
 
   if (orientation == GTK_PAGE_ORIENTATION_PORTRAIT) {
     gtk_page_setup_set_paper_size (page_setup, gtk_paper_size);
@@ -1162,40 +1127,59 @@ void
 marker_preview_scroll_left (MarkerPreview *preview)
 {
   g_autofree gchar *script = g_strdup_printf (SCROLL_STEP_SCRIPT, -SCROLL_STEP, 0);
-  webkit_web_view_run_javascript (WEBKIT_WEB_VIEW (preview), script, NULL, scroll_js_finished_cb, NULL);
+  webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
+                                       NULL, NULL, NULL, scroll_js_finished_cb, NULL);
 }
 
 void
 marker_preview_scroll_right (MarkerPreview *preview)
 {
   g_autofree gchar *script = g_strdup_printf (SCROLL_STEP_SCRIPT, SCROLL_STEP, 0);
-  webkit_web_view_run_javascript (WEBKIT_WEB_VIEW (preview), script, NULL, scroll_js_finished_cb, NULL);
+  webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
+                                       NULL, NULL, NULL, scroll_js_finished_cb, NULL);
 }
 
 void
 marker_preview_scroll_up (MarkerPreview *preview)
 {
   g_autofree gchar *script = g_strdup_printf (SCROLL_STEP_SCRIPT, 0, -SCROLL_STEP);
-  webkit_web_view_run_javascript (WEBKIT_WEB_VIEW (preview), script, NULL, scroll_js_finished_cb, NULL);
+  webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
+                                       NULL, NULL, NULL, scroll_js_finished_cb, NULL);
 }
 
 void
 marker_preview_scroll_down (MarkerPreview *preview)
 {
   g_autofree gchar *script = g_strdup_printf (SCROLL_STEP_SCRIPT, 0, SCROLL_STEP);
-  webkit_web_view_run_javascript (WEBKIT_WEB_VIEW (preview), script, NULL, scroll_js_finished_cb, NULL);
+  webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
+                                       NULL, NULL, NULL, scroll_js_finished_cb, NULL);
 }
 
 void
 marker_preview_scroll_to_top (MarkerPreview *preview)
 {
   g_autofree gchar *script = g_strdup_printf (SCROLL_SCRIPT, 0, 0);
-  webkit_web_view_run_javascript (WEBKIT_WEB_VIEW (preview), script, NULL, scroll_js_finished_cb, NULL);
+  webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
+                                       NULL, NULL, NULL, scroll_js_finished_cb, NULL);
 }
 
 void
 marker_preview_scroll_to_bottom (MarkerPreview *preview)
 {
   const gchar *script = "window.scrollTo(0,document.body.scrollHeight);";
-  webkit_web_view_run_javascript (WEBKIT_WEB_VIEW (preview), script, NULL, scroll_js_finished_cb, NULL);
+  webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
+                                       NULL, NULL, NULL, scroll_js_finished_cb, NULL);
+}
+
+void
+marker_preview_scroll_to_cursor (MarkerPreview *preview)
+{
+  preview->scroll_requested = TRUE;
+  if (preview->load_pending || preview->gnuplot_pending)
+    return;
+  preview->scroll_requested = FALSE;
+  const gchar *script =
+    "document.getElementById('cursor_pos')?.scrollIntoView({block:'center',behavior:'smooth'});";
+  webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
+                                       NULL, NULL, NULL, scroll_js_finished_cb, NULL);
 }

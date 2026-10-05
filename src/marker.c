@@ -1,251 +1,112 @@
-/*
- * marker.c
+/* marker.c
  *
- * Copyright (C) 2017 - 2018 Fabio Colacio
- *
- * Marker is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public License as
- * published by the Free Software Foundation; either version 3 of the
- * License, or (at your option) any later version.
- *
- * Marker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public
- * License along with Marker; see the file LICENSE.md. If not,
- * see <http://www.gnu.org/licenses/>.
- *
+ * Copyright (C) 2017-2026 Marker contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
-
-#include <gtk/gtk.h>
-#include <stdlib.h>
-
-#include <locale.h>
-#include <glib/gi18n.h>
-
-#include "marker-prefs.h"
-#include "marker-window.h"
-#include "marker-exporter.h"
 
 #include "marker.h"
 
-GtkApplication* app;
+#include <adwaita.h>
+#include <glib/gi18n.h>
+#include <gtksourceview/gtksource.h>
+#include <libspelling.h>
+#include <stdlib.h>
 
-GtkApplication*
-marker_get_app()
-{
-  return app;
-}
+#include "marker-exporter.h"
+#include "marker-prefs.h"
+#include "marker-session.h"
+#include "marker-window.h"
 
-static gboolean editor_mode_arg = FALSE;
-static gboolean preview_mode_arg = FALSE;
-static gboolean dual_pane_mode_arg = FALSE;
-static gboolean dual_window_mode_arg = FALSE;
-static gchar *outfile_arg = NULL;
+static GtkApplication *app;
+static gboolean initialized;
+static gboolean quitting;
+static gboolean editor_mode_arg;
+static gboolean preview_mode_arg;
+static gboolean dual_pane_mode_arg;
+static gboolean dual_window_mode_arg;
+static gboolean formatted_mode_arg;
+static gchar *outfile_arg;
+static gint command_status = -1;
 
-static const GOptionEntry CLI_OPTIONS[] =
-{
+static const GOptionEntry cli_options[] = {
   { "editor", 'e', 0, G_OPTION_ARG_NONE, &editor_mode_arg, "Open in editor-only mode", NULL },
   { "preview", 'p', 0, G_OPTION_ARG_NONE, &preview_mode_arg, "Open in preview-only mode", NULL },
   { "dual-pane", 'd', 0, G_OPTION_ARG_NONE, &dual_pane_mode_arg, "Open in dual-pane mode", NULL },
   { "dual-window", 'w', 0, G_OPTION_ARG_NONE, &dual_window_mode_arg, "Open in dual-window mode", NULL },
-  { "output", 'o', 0, G_OPTION_ARG_STRING, &outfile_arg, "Export the given markdown document as the given output file", NULL },
+  { "formatted", 'f', 0, G_OPTION_ARG_NONE, &formatted_mode_arg, "Open in Formatted Markdown mode", NULL },
+  { "output", 'o', 0, G_OPTION_ARG_STRING, &outfile_arg, "Export Markdown to the given output file", "FILE" },
   { NULL }
 };
 
-const int APP_MENU_ACTION_ENTRIES_LEN = 6;
-
-const GActionEntry APP_MENU_ACTION_ENTRIES[] =
+GtkApplication *
+marker_get_app (void)
 {
-  { "new", new_cb, NULL, NULL, NULL },
-  { "prefs", marker_prefs_cb, NULL, NULL, NULL },
-  { "shortcuts", marker_shortcuts_cb, NULL, NULL, NULL },
-  { "help", marker_help_cb, NULL, NULL, NULL },
-  { "about", marker_about_cb, NULL, NULL, NULL },
-  { "quit", marker_quit_cb, NULL, NULL, NULL }
-};
+  return app;
+}
 
 static void
-marker_init(GtkApplication* app)
+load_application_css (void)
 {
-  marker_prefs_load();
+  GtkCssProvider *provider = gtk_css_provider_new ();
+  gtk_css_provider_load_from_resource (provider,
+    "/com/github/fabiocolacio/marker/styles/marker.css");
+  gtk_style_context_add_provider_for_display (gdk_display_get_default (),
+                                              GTK_STYLE_PROVIDER (provider),
+                                              GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_object_unref (provider);
+}
 
+static void
+marker_init (void)
+{
+  if (initialized)
+    return;
+  initialized = TRUE;
+
+  marker_prefs_load ();
+  load_application_css ();
+  gtk_icon_theme_add_resource_path (gtk_icon_theme_get_for_display (gdk_display_get_default ()),
+                                    "/com/github/fabiocolacio/marker/icons");
   g_set_application_name ("Marker");
   g_set_prgname ("com.github.fabiocolacio.marker");
-  gtk_window_set_default_icon_name ("com.github.fabiocolacio.marker");
 
-  const gchar *quit_accels[] = { "<Ctrl>q", NULL };
-  gtk_application_set_accels_for_action (app, "app.quit", quit_accels);
-
-}
-
-static void
-activate(GtkApplication* app)
-{
-  marker_init (app);
-  marker_create_new_window();
-}
-
-static void
-marker_open(GtkApplication* app,
-            GFile**         files,
-            gint            num_files,
-            const gchar*    hint)
-{
-  g_application_hold (G_APPLICATION (app));
-  marker_init(app);
-
-  if (outfile_arg != NULL) {
-    g_autoptr (GFile) outfile = g_file_new_for_commandline_arg (outfile_arg);
-    g_autofree gchar *outfile_path = g_file_get_path (outfile);
-    g_autofree gchar *infile_path = g_file_get_path (files[0]);
-    exit (marker_exporter_export (infile_path, outfile_path)
-          ? EXIT_SUCCESS
-          : EXIT_FAILURE);
-  }
- 
-  for (int i = 0; i < num_files; ++i)
-  {
-    GFile* file = files[i];
-    if (g_file_query_file_type (file,
-                                G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
-                                NULL) == G_FILE_TYPE_DIRECTORY)
-    {
-      marker_create_new_window_from_workspace (file);
-    }
-    else
-    {
-      g_object_ref(file);
-      marker_open_file(file);
-    }
-  }
-  g_application_release (G_APPLICATION (app));
-}
-
-void
-new_cb(GSimpleAction* action,
-       GVariant*      parameter,
-       gpointer       user_data)
-{
-  marker_create_new_window();
-}
-
-void
-marker_prefs_cb(GSimpleAction* action,
-                GVariant*      parameter,
-                gpointer       user_data)
-{
-  marker_prefs_show_window();
-}
-
-void
-marker_help_cb(GSimpleAction* action,
-               GVariant*      parameter,
-               gpointer       user_data)
-{
-  GtkWindow *window;
-  GtkApplication *application = user_data;
-  GError *error = NULL;
-
-  window = gtk_application_get_active_window (application);
-  gtk_show_uri_on_window (window, "help:Marker",
-                          gtk_get_current_event_time (), &error);
-}
-
-void
-marker_about_cb(GSimpleAction* action,
-                GVariant*      parameter,
-                gpointer       user_data)
-{
-  const gchar* authors[] = {
-    "Fabio Colacio",
-    "Martino Ferrari",
-    NULL
+  const struct { const char *action; const char *accels[3]; } shortcuts[] = {
+    { "app.new", { "<Ctrl><Shift>N", NULL } },
+    { "app.quit", { "<Ctrl>Q", NULL } },
+    { "win.new-document", { "<Ctrl>N", NULL } },
+    { "win.open-file", { "<Ctrl>O", NULL } },
+    { "win.open-folder", { "<Ctrl><Shift>O", NULL } },
+    { "win.save", { "<Ctrl>S", NULL } },
+    { "win.save-as", { "<Ctrl><Shift>S", NULL } },
+    { "win.close-document", { "<Ctrl>W", NULL } },
+    { "win.search", { "<Ctrl>F", NULL } },
+    { "win.bold", { "<Ctrl>B", NULL } },
+    { "win.italic", { "<Ctrl>I", NULL } },
+    { "win.monospace", { "<Ctrl>M", NULL } },
+    { "win.link", { "<Ctrl>K", NULL } },
+    { "win.view-mode::editor", { "<Ctrl>1", NULL } },
+    { "win.view-mode::preview", { "<Ctrl>2", NULL } },
+    { "win.view-mode::dual-pane", { "<Ctrl>3", NULL } },
+    { "win.view-mode::dual-window", { "<Ctrl>4", NULL } },
+    { "win.view-mode::formatted", { "<Ctrl>5", NULL } },
+    { "win.focus", { "F11", NULL } },
+    { "win.escape", { "Escape", NULL } },
   };
 
-  const gchar* artists[] = {
-    "Fabio Colacio",
-    NULL
-  };
-
-  GtkAboutDialog* dialog = GTK_ABOUT_DIALOG(gtk_about_dialog_new());
-
-  gtk_about_dialog_set_logo_icon_name(dialog, "com.github.fabiocolacio.marker");
-  gtk_about_dialog_set_program_name(dialog, "Marker");
-  gtk_about_dialog_set_version(dialog, MARKER_VERSION);
-  gtk_about_dialog_set_comments(dialog, _("A markdown editor for GNOME"));
-  gtk_about_dialog_set_website(dialog, "https://github.com/fabiocolacio/Marker");
-  gtk_about_dialog_set_website_label(dialog, _("Report bugs and ideas on github"));
-  gtk_about_dialog_set_copyright(dialog, "Copyright 2017-2018 Fabio Colacio");
-  gtk_about_dialog_set_license_type(dialog, GTK_LICENSE_GPL_3_0);
-  gtk_about_dialog_set_authors(dialog, authors);
-  gtk_about_dialog_set_artists(dialog, artists);
-  gtk_about_dialog_set_translator_credits(dialog, _("translator-credits"));
-
-  GtkWindow* window = gtk_application_get_active_window(app);
-  gtk_window_set_transient_for(GTK_WINDOW(dialog), window);
-  gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
-
-  gtk_dialog_run(GTK_DIALOG(dialog));
-  gtk_widget_destroy(GTK_WIDGET(dialog));
-}
-
-void
-marker_quit_cb(GSimpleAction*  action,
-               GVariant*       parameter,
-               gpointer        user_data)
-{
-  marker_quit();
-}
-
-void
-marker_shortcuts_cb(GSimpleAction* action,
-                    GVariant*      parameter,
-                    gpointer       user_data)
-{
-  GtkBuilder* builder =
-    gtk_builder_new_from_resource("/com/github/fabiocolacio/marker/ui/marker-shortcuts-window.ui");
-
-  GtkWidget* dialog = GTK_WIDGET(gtk_builder_get_object(builder, "shortcuts"));
-
-  GtkWindow* parent = gtk_application_get_active_window(app);
-
-	if (GTK_WINDOW(parent) != gtk_window_get_transient_for(GTK_WINDOW(dialog)))
-	{
-		gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(parent));
-	}
-
-	gtk_widget_show_all(dialog);
-  gtk_window_present(GTK_WINDOW(dialog));
-
-  g_object_unref(builder);
-}
-
-gboolean
-marker_has_app_menu()
-{
-  if (gtk_application_get_app_menu(app))
-  {
-    return TRUE;
-  }
-  return FALSE;
-}
-
-void
-marker_create_new_window()
-{
-  MarkerWindow *window = marker_window_new (app);
-  gtk_widget_show (GTK_WIDGET (window));
+  for (guint i = 0; i < G_N_ELEMENTS (shortcuts); i++)
+    gtk_application_set_accels_for_action (app, shortcuts[i].action,
+                                           shortcuts[i].accels);
 }
 
 static void
-marker_apply_cli_view_mode (MarkerWindow *window)
+apply_cli_view_mode (MarkerWindow *window)
 {
   MarkerEditor *editor = marker_window_get_active_editor (window);
-
-  if (preview_mode_arg)
+  if (editor == NULL)
+    return;
+  if (formatted_mode_arg)
+    marker_editor_set_view_mode (editor, FORMATTED_MODE);
+  else if (preview_mode_arg)
     marker_editor_set_view_mode (editor, PREVIEW_ONLY_MODE);
   else if (editor_mode_arg)
     marker_editor_set_view_mode (editor, EDITOR_ONLY_MODE);
@@ -256,12 +117,20 @@ marker_apply_cli_view_mode (MarkerWindow *window)
 }
 
 void
+marker_create_new_window (void)
+{
+  MarkerWindow *window = marker_window_new (app);
+  marker_window_new_editor (window);
+  gtk_window_present (GTK_WINDOW (window));
+  apply_cli_view_mode (window);
+}
+
+void
 marker_create_new_window_from_file (GFile *file)
 {
   MarkerWindow *window = marker_window_new_from_file (app, file);
-  gtk_widget_show (GTK_WIDGET (window));
-
-  marker_apply_cli_view_mode (window);
+  gtk_window_present (GTK_WINDOW (window));
+  apply_cli_view_mode (window);
 }
 
 void
@@ -269,85 +138,272 @@ marker_create_new_window_from_workspace (GFile *folder)
 {
   g_autoptr (GError) error = NULL;
   MarkerWindow *window = marker_window_new_from_workspace (app, folder, &error);
-
   if (window == NULL)
-  {
-    GtkWidget *dialog = gtk_message_dialog_new (
-      gtk_application_get_active_window (app),
-      GTK_DIALOG_MODAL,
-      GTK_MESSAGE_ERROR,
-      GTK_BUTTONS_CLOSE,
-      "%s",
-      _("Unable to open workspace"));
-    gtk_message_dialog_format_secondary_text (GTK_MESSAGE_DIALOG (dialog),
-                                              "%s",
-                                              error->message);
-    gtk_dialog_run (GTK_DIALOG (dialog));
-    gtk_widget_destroy (dialog);
-    return;
-  }
-
-  gtk_widget_show (GTK_WIDGET (window));
-  marker_apply_cli_view_mode (window);
+    {
+      g_warning ("Unable to open project: %s", error->message);
+      return;
+    }
+  gtk_window_present (GTK_WINDOW (window));
+  apply_cli_view_mode (window);
 }
-
 
 void
 marker_open_file (GFile *file)
 {
-  GList *windows = gtk_application_get_windows(app);
-  if (g_list_last(windows))
-  {
-    if (MARKER_IS_WINDOW(windows->data))
+  GtkWindow *active = gtk_application_get_active_window (app);
+  if (MARKER_IS_WINDOW (active))
+    marker_window_new_editor_from_file (MARKER_WINDOW (active), file);
+  else
+    marker_create_new_window_from_file (file);
+}
+
+static void
+restore_session (void)
+{
+  g_autoptr (GError) error = NULL;
+  g_autoptr (GPtrArray) windows = marker_session_load (&error);
+
+  if (windows == NULL || windows->len == 0)
     {
-      MarkerWindow *window = MARKER_WINDOW(windows->data);
-      marker_window_new_editor_from_file(window, file);
+      marker_create_new_window ();
       return;
     }
-  }
 
-  marker_create_new_window_from_file(file);
+  for (guint i = 0; i < windows->len; i++)
+    {
+      MarkerSessionWindow *saved = g_ptr_array_index (windows, i);
+      MarkerWindow *window = marker_window_new (app);
 
+      for (guint j = 0; j < saved->projects->len; j++)
+        {
+          g_autoptr (GFile) folder = g_file_new_for_uri (g_ptr_array_index (saved->projects, j));
+          marker_window_add_project (window, folder);
+        }
+      for (guint j = 0; j < saved->documents->len; j++)
+        {
+          g_autoptr (GFile) file = g_file_new_for_uri (g_ptr_array_index (saved->documents, j));
+          marker_window_restore_saved_document (window, file);
+        }
+      if (saved->documents->len == 0)
+        marker_window_new_editor (window);
+      marker_window_set_active_project_index (window, saved->active_project);
+      marker_window_set_active_document_uri (window, saved->active_document);
+      marker_window_restore_navigation (window, saved);
+      gtk_window_present (GTK_WINDOW (window));
+    }
+}
+
+static void
+activate_cb (GtkApplication *application,
+             gpointer        user_data)
+{
+  marker_init ();
+  if (editor_mode_arg || preview_mode_arg || dual_pane_mode_arg ||
+      dual_window_mode_arg || formatted_mode_arg)
+    marker_create_new_window ();
+  else
+    restore_session ();
+}
+
+static void
+open_cb (GtkApplication *application,
+         GFile         **files,
+         gint            n_files,
+         const char     *hint,
+         gpointer        user_data)
+{
+  MarkerWindow *window;
+
+  marker_init ();
+  if (outfile_arg != NULL && n_files > 0)
+    {
+      g_autofree char *input = g_file_get_path (files[0]);
+      g_autoptr (GFile) output_file = g_file_new_for_commandline_arg (outfile_arg);
+      g_autofree char *output = g_file_get_path (output_file);
+      command_status = marker_exporter_export (input, output)
+                         ? EXIT_SUCCESS : EXIT_FAILURE;
+      g_application_quit (G_APPLICATION (application));
+      return;
+    }
+
+  window = marker_window_new (application);
+  for (gint i = 0; i < n_files; i++)
+    {
+      GFileType type = g_file_query_file_type (files[i], G_FILE_QUERY_INFO_NONE, NULL);
+      if (type == G_FILE_TYPE_DIRECTORY)
+        marker_window_add_project (window, files[i]);
+      else
+        marker_window_new_editor_from_file (window, files[i]);
+    }
+  if (marker_window_get_active_editor (window) == NULL)
+    marker_window_new_editor (window);
+  apply_cli_view_mode (window);
+  gtk_window_present (GTK_WINDOW (window));
 }
 
 void
-marker_quit()
+marker_save_session (void)
 {
-  GtkApplication *app = marker_get_app();
-  GList *windows = gtk_application_get_windows(app);
-  for (GList *item = windows; item != NULL; item = item->next)
-  {
-    if (MARKER_IS_WINDOW(item->data))
-    {
-      MarkerWindow *window = item->data;
-      marker_window_try_close (window);
-    }
-  }
+  g_autoptr (GPtrArray) saved = NULL;
+
+  if (app == NULL)
+    return;
+  saved = g_ptr_array_new_with_free_func ((GDestroyNotify) marker_session_window_free);
+  for (GList *item = gtk_application_get_windows (app); item != NULL; item = item->next)
+    if (MARKER_IS_WINDOW (item->data))
+      g_ptr_array_add (saved, marker_window_capture_session (MARKER_WINDOW (item->data)));
+  if (saved->len > 0)
+    marker_session_save (saved, NULL);
 }
 
-int
-main(int    argc,
-     char** argv)
+static void
+save_session_cb (GApplication *application,
+                 gpointer      user_data)
 {
+  marker_save_session ();
+}
 
-  /* Initialize gettext support */
+static void
+window_removed_cb (GtkApplication *application,
+                   GtkWindow      *window,
+                   gpointer        user_data)
+{
+  if (!quitting && gtk_application_get_windows (application) != NULL)
+    marker_save_session ();
+}
+
+void
+new_cb (GSimpleAction *action,
+        GVariant      *parameter,
+        gpointer       user_data)
+{
+  marker_create_new_window ();
+}
+
+void
+marker_prefs_cb (GSimpleAction *action,
+                 GVariant      *parameter,
+                 gpointer       user_data)
+{
+  marker_prefs_show_window ();
+}
+
+void
+marker_help_cb (GSimpleAction *action,
+                GVariant      *parameter,
+                gpointer       user_data)
+{
+  GtkUriLauncher *launcher = gtk_uri_launcher_new ("help:Marker");
+  gtk_uri_launcher_launch (launcher, gtk_application_get_active_window (app),
+                           NULL, NULL, NULL);
+  g_object_unref (launcher);
+}
+
+void
+marker_about_cb (GSimpleAction *action,
+                 GVariant      *parameter,
+                 gpointer       user_data)
+{
+  const char *authors[] = { "Fabio Colacio", "Martino Ferrari", "Marker contributors", NULL };
+  GtkWidget *dialog = gtk_about_dialog_new ();
+  gtk_about_dialog_set_logo_icon_name (GTK_ABOUT_DIALOG (dialog),
+                                       "com.github.fabiocolacio.marker");
+  gtk_about_dialog_set_program_name (GTK_ABOUT_DIALOG (dialog), "Marker");
+  gtk_about_dialog_set_version (GTK_ABOUT_DIALOG (dialog), MARKER_VERSION);
+  gtk_about_dialog_set_comments (GTK_ABOUT_DIALOG (dialog),
+                                 _("A project-based Markdown editor for GNOME"));
+  gtk_about_dialog_set_website (GTK_ABOUT_DIALOG (dialog),
+                                "https://github.com/fabiocolacio/Marker");
+  gtk_about_dialog_set_license_type (GTK_ABOUT_DIALOG (dialog), GTK_LICENSE_GPL_3_0);
+  gtk_about_dialog_set_authors (GTK_ABOUT_DIALOG (dialog), authors);
+  gtk_window_set_transient_for (GTK_WINDOW (dialog),
+                                gtk_application_get_active_window (app));
+  gtk_window_present (GTK_WINDOW (dialog));
+}
+
+void
+marker_shortcuts_cb (GSimpleAction *action,
+                     GVariant      *parameter,
+                     gpointer       user_data)
+{
+  AdwDialog *dialog = adw_dialog_new ();
+  GtkWidget *page = adw_status_page_new ();
+  adw_dialog_set_title (dialog, _("Keyboard Shortcuts"));
+  adw_dialog_set_content_width (dialog, 520);
+  adw_dialog_set_content_height (dialog, 520);
+  adw_status_page_set_icon_name (ADW_STATUS_PAGE (page), "preferences-desktop-keyboard-shortcuts-symbolic");
+  adw_status_page_set_title (ADW_STATUS_PAGE (page), _("Keyboard Shortcuts"));
+  adw_status_page_set_description (ADW_STATUS_PAGE (page),
+    _("Ctrl+1…5  View modes\nCtrl+O  Open file\nCtrl+Shift+O  Open folder\nCtrl+S  Save\nCtrl+F  Find\nF11  Focus mode\nEscape  Leave focus mode"));
+  adw_dialog_set_child (dialog, page);
+  adw_dialog_present (dialog, GTK_WIDGET (gtk_application_get_active_window (app)));
+}
+
+void
+marker_quit (void)
+{
+  GList *windows = g_list_copy (gtk_application_get_windows (app));
+  gboolean pending = FALSE;
+
+  marker_save_session ();
+  quitting = TRUE;
+  for (GList *item = windows; item != NULL; item = item->next)
+    if (MARKER_IS_WINDOW (item->data))
+      {
+        if (marker_window_try_close (item->data))
+          gtk_window_destroy (GTK_WINDOW (item->data));
+        else
+          pending = TRUE;
+      }
+  if (pending)
+    quitting = FALSE;
+  g_list_free (windows);
+}
+
+void
+marker_quit_cb (GSimpleAction *action,
+                GVariant      *parameter,
+                gpointer       user_data)
+{
+  marker_quit ();
+}
+
+
+const int APP_MENU_ACTION_ENTRIES_LEN = 6;
+const GActionEntry APP_MENU_ACTION_ENTRIES[] = {
+  { "new", new_cb },
+  { "prefs", marker_prefs_cb },
+  { "shortcuts", marker_shortcuts_cb },
+  { "help", marker_help_cb },
+  { "about", marker_about_cb },
+  { "quit", marker_quit_cb },
+};
+
+int
+main (int argc,
+      char **argv)
+{
+  int status;
+
   bindtextdomain ("marker", LOCALE_DIR);
   bind_textdomain_codeset ("marker", "UTF-8");
   textdomain ("marker");
 
-  gtk_source_init();
-
-  app = gtk_application_new("com.github.fabiocolacio.marker",
-                            G_APPLICATION_HANDLES_OPEN);
-  g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
-  g_signal_connect(app, "open", G_CALLBACK(marker_open), NULL);
-
-  g_application_add_main_option_entries (G_APPLICATION(app), CLI_OPTIONS);
-
-  int status = g_application_run(G_APPLICATION(app), argc, argv);
-  g_object_unref(app);
-
-  gtk_source_finalize();
-
+  gtk_source_init ();
+  spelling_init ();
+  app = GTK_APPLICATION (adw_application_new ("com.github.fabiocolacio.marker",
+                                               G_APPLICATION_HANDLES_OPEN));
+  g_action_map_add_action_entries (G_ACTION_MAP (app), APP_MENU_ACTION_ENTRIES,
+                                   APP_MENU_ACTION_ENTRIES_LEN, app);
+  g_application_add_main_option_entries (G_APPLICATION (app), cli_options);
+  g_signal_connect (app, "activate", G_CALLBACK (activate_cb), NULL);
+  g_signal_connect (app, "open", G_CALLBACK (open_cb), NULL);
+  g_signal_connect (app, "window-removed", G_CALLBACK (window_removed_cb), NULL);
+  g_signal_connect (app, "shutdown", G_CALLBACK (save_session_cb), NULL);
+  status = g_application_run (G_APPLICATION (app), argc, argv);
+  if (command_status >= 0)
+    status = command_status;
+  g_clear_object (&app);
+  gtk_source_finalize ();
   return status;
 }

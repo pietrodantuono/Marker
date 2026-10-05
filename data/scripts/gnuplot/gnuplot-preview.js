@@ -274,7 +274,7 @@ try {
     for (const path of paths) {
       if (!WORLD_HANDLER?.markerGnuplotData)
         throw new Error("Gnuplot data loading is unavailable.");
-      const encoded = await WORLD_HANDLER.markerGnuplotData.postMessage(path);
+      const encoded = await WORLD_HANDLER.markerGnuplotData.postMessage({path, serial: globalThis.markerRenderSerial});
       if (typeof encoded !== "string") throw new Error("Unable to read plot data.");
       const binary = atob(encoded);
       const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
@@ -486,7 +486,7 @@ try {
     } catch (error) {
       console.error(message(error));
     } finally {
-      try { await WORLD_HANDLER?.markerGnuplotDone?.postMessage(true); }
+      try { await WORLD_HANDLER?.markerGnuplotDone?.postMessage(globalThis.markerRenderSerial); }
       catch (_) { /* The page may have been replaced. */ }
     }
   })();

@@ -1,79 +1,92 @@
-/*
- * marker-prefs.c
+/* marker-prefs.c
  *
- * Copyright (C) 2017 - 2018 Fabio Colacio
- *
- * Marker is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public License as
- * published by the Free Software Foundation; either version 3 of the
- * License, or (at your option) any later version.
- *
- * Marker is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- * Library General Public License for more details.
- *
- * You should have received a copy of the GNU Library General Public
- * License along with Marker; see the file LICENSE.md. If not,
- * see <http://www.gnu.org/licenses/>.
- *
+ * Copyright (C) 2017-2026 Marker contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
-
-#include <gtk/gtk.h>
-#include <gtksourceview/gtksource.h>
-#include <gtkspell/gtkspell.h>
-
-#include <dirent.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include "marker.h"
-#include "marker-widget.h"
-#include "marker-string.h"
-#include "marker-window.h"
 
 #include "marker-prefs.h"
 
-MarkerPrefs prefs;
-static GSettings *desktop_settings;
-static GDBusProxy *appearance_portal;
-static guint system_color_scheme;
+#include <adwaita.h>
+#include <gtksourceview/gtksource.h>
 
-static void update_editors (void);
-static void refresh_preview (void);
+#include "marker.h"
+#include "marker-window.h"
+
+MarkerPrefs prefs;
+
+static GSettings *desktop_settings;
+static AdwDialog *preferences_dialog;
 
 static gboolean
-system_uses_dark_theme (void)
+has_existing_profile (void)
 {
-  if (system_color_scheme == 1 || system_color_scheme == 2)
-    return system_color_scheme == 1;
+  GSettings *settings[] = {
+    prefs.editor_settings,
+    prefs.preview_settings,
+    prefs.window_settings
+  };
+  const char *schema_ids[] = {
+    "com.github.fabiocolacio.marker.preferences.editor",
+    "com.github.fabiocolacio.marker.preferences.preview",
+    "com.github.fabiocolacio.marker.preferences.window"
+  };
+  GSettingsSchemaSource *source = g_settings_schema_source_get_default ();
 
-  g_autoptr (GSettingsSchema) schema = g_settings_schema_source_lookup (
-    g_settings_schema_source_get_default (), "org.gnome.desktop.interface", TRUE);
-  if (g_settings_schema_has_key (schema, "color-scheme")) {
-    g_autofree gchar *choice = g_settings_get_string (desktop_settings, "color-scheme");
-    if (g_str_equal (choice, "prefer-dark") || g_str_equal (choice, "prefer-light"))
-      return g_str_equal (choice, "prefer-dark");
-  }
+  for (guint i = 0; i < G_N_ELEMENTS (settings); i++)
+    {
+      GSettingsSchema *schema = g_settings_schema_source_lookup (source,
+                                                                 schema_ids[i],
+                                                                 TRUE);
+      g_auto (GStrv) keys = NULL;
 
-  g_autofree gchar *theme = NULL;
-  g_object_get (gtk_settings_get_default (), "gtk-theme-name", &theme, NULL);
-  g_autofree gchar *lower = g_ascii_strdown (theme ? theme : "", -1);
-  return strstr (lower, "dark") != NULL;
+      if (schema == NULL)
+        continue;
+      keys = g_settings_schema_list_keys (schema);
+      for (guint j = 0; keys[j] != NULL; j++)
+        {
+          g_autoptr (GVariant) value = NULL;
+
+          if (g_str_equal (keys[j], "profile-initialized"))
+            continue;
+          value = g_settings_get_user_value (settings[i], keys[j]);
+          if (value != NULL)
+            {
+              g_settings_schema_unref (schema);
+              return TRUE;
+            }
+        }
+      g_settings_schema_unref (schema);
+    }
+
+  return FALSE;
+}
+
+static void
+apply_color_scheme (void)
+{
+  AdwStyleManager *manager = adw_style_manager_get_default ();
+
+  if (marker_prefs_get_follow_system_theme ())
+    adw_style_manager_set_color_scheme (manager, ADW_COLOR_SCHEME_DEFAULT);
+  else if (g_settings_get_boolean (prefs.window_settings, "enable-dark-mode"))
+    adw_style_manager_set_color_scheme (manager, ADW_COLOR_SCHEME_FORCE_DARK);
+  else
+    adw_style_manager_set_color_scheme (manager, ADW_COLOR_SCHEME_FORCE_LIGHT);
 }
 
 gboolean
-marker_prefs_get_use_dark_theme()
+marker_prefs_get_use_dark_theme (void)
 {
   if (marker_prefs_get_follow_system_theme ())
-    return system_uses_dark_theme ();
-  return g_settings_get_boolean(prefs.window_settings, "enable-dark-mode");
+    return adw_style_manager_get_dark (adw_style_manager_get_default ());
+  return g_settings_get_boolean (prefs.window_settings, "enable-dark-mode");
 }
 
 void
-marker_prefs_set_use_dark_theme(gboolean state)
+marker_prefs_set_use_dark_theme (gboolean state)
 {
-  g_settings_set_boolean(prefs.window_settings, "enable-dark-mode", state);
+  g_settings_set_boolean (prefs.window_settings, "enable-dark-mode", state);
+  apply_color_scheme ();
 }
 
 gboolean
@@ -82,1144 +95,552 @@ marker_prefs_get_follow_system_theme (void)
   return g_settings_get_boolean (prefs.window_settings, "follow-system-theme");
 }
 
-void
-marker_prefs_set_follow_system_theme (gboolean state)
-{
-  g_settings_set_boolean (prefs.window_settings, "follow-system-theme", state);
-}
 
 gchar *
 marker_prefs_get_editor_font (void)
 {
-  gchar *font = g_settings_get_string (prefs.editor_settings, "font");
+  char *font = g_settings_get_string (prefs.editor_settings, "font");
+
   if (*font != '\0')
     return font;
   g_free (font);
   return g_settings_get_string (desktop_settings, "monospace-font-name");
 }
 
+
+#define UINT_GETTER(Name, Settings, Key) \
+  guint marker_prefs_get_##Name (void) { return g_settings_get_uint (prefs.Settings, Key); }
+
+#define BOOL_GETTER(Name, Settings, Key) \
+  gboolean marker_prefs_get_##Name (void) { return g_settings_get_boolean (prefs.Settings, Key); }
+
+#define STRING_GETTER(Name, Settings, Key) \
+  char * marker_prefs_get_##Name (void) { return g_settings_get_string (prefs.Settings, Key); }
+
+UINT_GETTER (window_width, window_settings, "window-width")
 void
-marker_prefs_set_editor_font (const gchar *font)
+marker_prefs_set_window_width (guint value)
 {
-  g_settings_set_string (prefs.editor_settings, "font", font);
+  g_settings_set_uint (prefs.window_settings, "window-width", value);
 }
 
-guint
-marker_prefs_get_window_width()
-{
-  return g_settings_get_uint(prefs.window_settings, "window-width");
-}
-
+UINT_GETTER (window_height, window_settings, "window-height")
 void
-marker_prefs_set_window_width(guint width)
+marker_prefs_set_window_height (guint value)
 {
-  g_settings_set_uint(prefs.window_settings, "window-width", width);
+  g_settings_set_uint (prefs.window_settings, "window-height", value);
 }
 
-guint
-marker_prefs_get_window_height()
-{
-  return g_settings_get_uint(prefs.window_settings, "window-height");
-}
-
+UINT_GETTER (editor_pane_width, window_settings, "editor-pane-width")
 void
-marker_prefs_set_window_height(guint height)
+marker_prefs_set_editor_pane_width (guint value)
 {
-  g_settings_set_uint(prefs.window_settings, "window-height", height);
+  g_settings_set_uint (prefs.window_settings, "editor-pane-width", value);
 }
 
+UINT_GETTER (tab_width, editor_settings, "tab-width")
+UINT_GETTER (right_margin_position, editor_settings, "show-right-margin-position")
+
+BOOL_GETTER (show_sidebar, window_settings, "show-sidebar")
+
+BOOL_GETTER (replace_tabs, editor_settings, "replace-tabs")
+BOOL_GETTER (auto_indent, editor_settings, "auto-indent")
+
+BOOL_GETTER (spell_check, editor_settings, "spell-check")
+BOOL_GETTER (show_line_numbers, editor_settings, "show-line-numbers")
+BOOL_GETTER (highlight_current_line, editor_settings, "highlight-current-line")
+BOOL_GETTER (wrap_text, editor_settings, "wrap-text")
+BOOL_GETTER (show_right_margin, editor_settings, "show-right-margin")
+BOOL_GETTER (use_css_theme, preview_settings, "css-toggle")
 void
-marker_prefs_get_window_position(gint *pos_x,
-                                 gint *pos_y)
+marker_prefs_set_use_css_theme (gboolean value)
 {
-  g_settings_get(prefs.window_settings, "window-position", "(ii)", pos_x, pos_y);
+  g_settings_set_boolean (prefs.preview_settings, "css-toggle", value);
 }
 
+BOOL_GETTER (use_mathjs, preview_settings, "mathjs-toggle")
+BOOL_GETTER (use_highlight, preview_settings, "highlight-toggle")
+BOOL_GETTER (use_mermaid, preview_settings, "mermaid-toggle")
+BOOL_GETTER (use_gnuplot, preview_settings, "gnuplot-toggle")
+BOOL_GETTER (use_charter, preview_settings, "charter-toggle")
+
+STRING_GETTER (syntax_theme, editor_settings, "syntax-theme")
+STRING_GETTER (spell_check_language, editor_settings, "spell-check-lang")
+STRING_GETTER (css_theme, preview_settings, "css-theme")
 void
-marker_prefs_set_window_position(gint pos_x,
-                                 gint pos_y)
+marker_prefs_set_css_theme (const char * value)
 {
-  g_settings_set(prefs.window_settings, "window-position", "(ii)", pos_x, pos_y);
+  g_settings_set_string (prefs.preview_settings, "css-theme", value);
 }
 
-guint
-marker_prefs_get_editor_pane_width()
-{
-  guint width = g_settings_get_uint (prefs.window_settings, "editor-pane-width");
-
-  if (width == 0)
-  {
-    g_autoptr (GVariant) default_width =
-      g_settings_get_default_value (prefs.window_settings, "editor-pane-width");
-    width = g_variant_get_uint32 (default_width);
-  }
-
-  return width;
-}
-
-void
-marker_prefs_set_editor_pane_width(guint width)
-{
-  g_settings_set_uint(prefs.window_settings, "editor-pane-width", width);
-}
-
-gboolean
-marker_prefs_get_show_sidebar()
-{
-  return g_settings_get_boolean(prefs.window_settings, "show-sidebar");
-}
-
-void
-marker_prefs_set_show_sidebar(gboolean state)
-{
-  g_settings_set_boolean(prefs.window_settings, "show-sidebar", state);
-}
-
-gboolean
-marker_prefs_get_use_syntax_theme()
-{
-  return g_settings_get_boolean(prefs.editor_settings, "enable-syntax-theme");
-}
-
-void
-marker_prefs_set_use_syntax_theme(gboolean state)
-{
-  g_settings_set_boolean(prefs.editor_settings, "enable-syntax-theme", state);
-}
-
-char*
-marker_prefs_get_css_theme()
-{
-  return g_settings_get_string(prefs.preview_settings, "css-theme");
-}
-
-void
-marker_prefs_set_css_theme(const char* theme)
-{
-  g_settings_set_string(prefs.preview_settings, "css-theme", theme);
-}
-
-gboolean
-marker_prefs_get_use_css_theme()
-{
-  return g_settings_get_boolean(prefs.preview_settings, "css-toggle");
-}
-
-void
-marker_prefs_set_use_css_theme(gboolean state)
-{
-  g_settings_set_boolean(prefs.preview_settings, "css-toggle", state);
-}
-
-char*
-marker_prefs_get_highlight_theme()
-{
-  return g_settings_get_string(prefs.preview_settings, "highlight-theme");
-}
+STRING_GETTER (highlight_theme, preview_settings, "highlight-theme")
 
 
-void
-marker_prefs_set_highlight_theme(const char* theme)
-{
-  g_settings_set_string(prefs.preview_settings, "highlight-theme", theme);
-}
-
-gboolean
-marker_prefs_get_use_mathjs()
-{
-  return g_settings_get_boolean(prefs.preview_settings, "mathjs-toggle");
-}
-
-void
-marker_prefs_set_use_mathjs(gboolean state)
-{
-  g_settings_set_boolean(prefs.preview_settings, "mathjs-toggle", state);
-}
 
 gdouble
-makrer_prefs_get_zoom_level()
+marker_prefs_get_zoom_level (void)
 {
-  return  g_settings_get_double(prefs.preview_settings, "preview-zoom-level");
+  return g_settings_get_double (prefs.preview_settings, "preview-zoom-level");
 }
 
 void
-marker_prefs_set_zoom_level(gdouble val)
+marker_prefs_set_zoom_level (gdouble value)
 {
-  g_settings_set_double(prefs.preview_settings, "preview-zoom-level", val);
-}
-
-gboolean
-marker_prefs_get_use_mermaid()
-{
-  return g_settings_get_boolean(prefs.preview_settings, "mermaid-toggle");
-}
-
-void
-marker_prefs_set_use_mermaid(gboolean state)
-{
-  g_settings_set_boolean(prefs.preview_settings, "mermaid-toggle", state);
-}
-
-gboolean
-marker_prefs_get_use_gnuplot (void)
-{
-  return g_settings_get_boolean (prefs.preview_settings, "gnuplot-toggle");
-}
-
-void
-marker_prefs_set_use_gnuplot (gboolean state)
-{
-  g_settings_set_boolean (prefs.preview_settings, "gnuplot-toggle", state);
+  g_settings_set_double (prefs.preview_settings, "preview-zoom-level", value);
 }
 
 gchar *
 marker_prefs_get_preview_font (const gchar *role)
 {
-  g_autofree gchar *enabled_key = g_strdup_printf ("override-%s-font", role);
-  g_autofree gchar *font_key = g_strdup_printf ("%s-font", role);
-  return g_settings_get_boolean (prefs.preview_settings, enabled_key)
-    ? g_settings_get_string (prefs.preview_settings, font_key) : NULL;
+  g_autofree char *toggle_key = g_strdup_printf ("override-%s-font", role);
+  g_autofree char *font_key = g_strdup_printf ("%s-font", role);
+
+  if (!g_settings_get_boolean (prefs.preview_settings, toggle_key))
+    return NULL;
+  return g_settings_get_string (prefs.preview_settings, font_key);
 }
 
-gboolean
-marker_prefs_get_use_charter()
-{
-  return g_settings_get_boolean(prefs.preview_settings, "charter-toggle");
-}
 
-void
-marker_prefs_set_use_charter(gboolean state)
-{
-  g_settings_set_boolean(prefs.preview_settings, "charter-toggle", state);
-}
-
-gboolean
-marker_prefs_get_use_highlight()
-{
-  return g_settings_get_boolean(prefs.preview_settings, "highlight-toggle");
-}
-
-void
-marker_prefs_set_use_highlight(gboolean state)
-{
-  g_settings_set_boolean(prefs.preview_settings, "highlight-toggle", state);
-}
-
-char*
-marker_prefs_get_syntax_theme()
-{
-  return g_settings_get_string(prefs.editor_settings, "syntax-theme");
-}
-
-void
-marker_prefs_set_syntax_theme(const char* theme)
-{
-  g_settings_set_string(prefs.editor_settings, "syntax-theme", theme);
-}
-
-guint
-marker_prefs_get_right_margin_position()
-{
-  return g_settings_get_uint(prefs.editor_settings, "show-right-margin-position");
-}
-
-void
-marker_prefs_set_right_margin_position(guint position)
-{
-  g_settings_set_uint(prefs.editor_settings, "show-right-margin-position", position);
-}
-
-gboolean
-marker_prefs_get_replace_tabs()
-{
-  return  g_settings_get_boolean(prefs.editor_settings, "replace-tabs");
-}
-
-void
-marker_prefs_set_replace_tabs(gboolean state)
-{
-   g_settings_set_boolean(prefs.editor_settings, "replace-tabs", state);
-}
-
-guint
-marker_prefs_get_tab_width()
-{
-  return g_settings_get_uint(prefs.editor_settings, "tab-width");
-}
-
-void
-marker_prefs_set_tab_width(guint width)
-{
-  g_settings_set_uint(prefs.editor_settings, "tab-width", width);
-}
-
-gboolean
-marker_prefs_get_auto_indent()
-{
-  return g_settings_get_boolean(prefs.editor_settings, "auto-indent");
-}
-
-void
-marker_prefs_set_auto_indent(gboolean state)
-{
-  g_settings_set_boolean(prefs.editor_settings, "auto-indent", state);
-}
-
-gboolean
-marker_prefs_get_show_spaces (void)
-{
-  return g_settings_get_boolean(prefs.editor_settings, "show-spaces");
-}
-
-void
-marker_prefs_set_show_spaces (gboolean state)
-{
-  g_settings_set_boolean(prefs.editor_settings, "show-spaces", state);
-}
-
-gboolean
-marker_prefs_get_spell_check()
-{
-  return g_settings_get_boolean(prefs.editor_settings, "spell-check");
-}
-
-void
-marker_prefs_set_spell_check(gboolean state)
-{
-  g_settings_set_boolean(prefs.editor_settings, "spell-check", state);
-}
-
-gchar*
-marker_prefs_get_spell_check_language()
-{
-  return g_settings_get_string(prefs.editor_settings, "spell-check-lang");
-}
-
-void
-marker_prefs_set_spell_check_language(const char* lang)
-{
-  g_settings_set_string(prefs.editor_settings, "spell-check-lang", lang);
-}
-
-gboolean
-marker_prefs_get_show_line_numbers()
-{
-  return g_settings_get_boolean(prefs.editor_settings, "show-line-numbers");
-}
-
-void
-marker_prefs_set_show_line_numbers(gboolean state)
-{
-  g_settings_set_boolean(prefs.editor_settings, "show-line-numbers", state);
-}
-
-gboolean
-marker_prefs_get_highlight_current_line()
-{
-  return g_settings_get_boolean(prefs.editor_settings, "highlight-current-line");
-}
-
-void
-marker_prefs_set_highlight_current_line(gboolean state)
-{
-  g_settings_set_boolean(prefs.editor_settings, "highlight-current-line", state);
-}
-
-gboolean
-marker_prefs_get_wrap_text()
-{
-  return g_settings_get_boolean(prefs.editor_settings, "wrap-text");
-}
-
-void
-marker_prefs_set_wrap_text(gboolean state)
-{
-  g_settings_set_boolean(prefs.editor_settings, "wrap-text", state);
-}
-
-gboolean
-marker_prefs_get_show_right_margin()
-{
-  return g_settings_get_boolean(prefs.editor_settings, "show-right-margin");
-}
-
-void
-marker_prefs_set_show_right_margin(gboolean state)
-{
-  g_settings_set_boolean(prefs.editor_settings, "show-right-margin", state);
-}
 
 MarkerViewMode
-marker_prefs_get_default_view_mode()
+marker_prefs_get_default_view_mode (void)
 {
-  return g_settings_get_enum(prefs.window_settings, "view-mode");
+  return (MarkerViewMode) g_settings_get_enum (prefs.window_settings, "view-mode");
 }
 
 void
-marker_prefs_set_default_view_mode(MarkerViewMode view_mode)
+marker_prefs_set_default_view_mode (MarkerViewMode view_mode)
 {
-  g_settings_set_enum(prefs.window_settings, "view-mode", view_mode);
+  g_settings_set_enum (prefs.window_settings, "view-mode", view_mode);
 }
-
 
 MarkerMathBackEnd
 marker_prefs_get_math_backend (void)
 {
-  return g_settings_get_enum(prefs.preview_settings, "math-backend");
+  return (MarkerMathBackEnd) g_settings_get_enum (prefs.preview_settings, "math-backend");
 }
 
 void
-marker_prefs_set_math_backend (MarkerMathBackEnd   backend)
+marker_prefs_set_math_backend (MarkerMathBackEnd backend)
 {
-  g_settings_set_enum(prefs.preview_settings, "math-backend", backend);
-}
-
-GList*
-marker_prefs_get_available_stylesheets()
-{
-  GList* list = NULL;
-  char* list_item;
-
-  DIR* dir;
-  struct dirent* ent;
-  char* filename;
-  if ((dir = opendir(STYLES_DIR)) != NULL)
-  {
-    while ((ent = readdir(dir)) != NULL)
-    {
-      filename = ent->d_name;
-      if (marker_string_ends_with(filename, ".css"))
-      {
-        list_item = marker_string_alloc(filename);
-        list = g_list_prepend(list, list_item);
-      }
-    }
-  }
-  closedir(dir);
-
-  return list;
-}
-
-GList*
-marker_prefs_get_available_highlight_themes()
-{
-  GList* list = NULL;
-  char* list_item;
-
-  DIR* dir;
-  struct dirent* ent;
-  char* filename;
-
-  if ((dir = opendir(HIGHLIGHT_STYLES_DIR)) != NULL)
-  {
-    while ((ent = readdir(dir)) != NULL)
-    {
-      filename = ent->d_name;
-
-      if (marker_string_ends_with(filename, ".css"))
-      {
-        list_item = marker_string_filename_get_name_noext(filename);
-        list = g_list_prepend(list, list_item);
-      }
-    }
-  }
-  closedir(dir);
-
-  return list;
-}
-
-GList*
-marker_prefs_get_available_languages()
-{
-  GList* list = gtk_spell_checker_get_language_list ();
-  return list;
-}
-
-GList*
-marker_prefs_get_available_syntax_themes()
-{
-  GList* list = NULL;
-
-  GtkSourceStyleSchemeManager* style_manager =
-    gtk_source_style_scheme_manager_get_default();
-  const gchar * const * ids =
-    gtk_source_style_scheme_manager_get_scheme_ids(style_manager);
-
-  for (int i = 0; ids[i] != NULL; ++i)
-  {
-    const gchar* id = ids[i];
-    char* item = marker_string_alloc(id);
-    list = g_list_prepend(list, item);
-  }
-
-  return list;
+  g_settings_set_enum (prefs.preview_settings, "math-backend", backend);
 }
 
 static void
-update_editors ()
+theme_setting_changed_cb (GSettings *settings,
+                          gchar     *key,
+                          gpointer   user_data)
 {
-  GtkApplication *app = marker_get_app();
-  GList *windows = gtk_application_get_windows(app);
-  for (GList *item = windows; item != NULL; item = item->next)
-  {
-    if (MARKER_IS_WINDOW(item->data))
-    {
-      MarkerWindow *window = item->data;
-      marker_window_apply_prefs (window);
-    }
-  }
+  apply_color_scheme ();
+  GtkApplication *application = marker_get_app ();
+  if (application == NULL)
+    return;
+  for (GList *item = gtk_application_get_windows (application);
+       item != NULL; item = item->next)
+    if (MARKER_IS_WINDOW (item->data))
+      marker_window_apply_prefs (MARKER_WINDOW (item->data));
 }
 
 static void
-refresh_preview ()
+preference_changed_cb (GSettings *settings,
+                       gchar     *key,
+                       gpointer   user_data)
 {
-  GtkApplication *app = marker_get_app();
-  GList *windows = gtk_application_get_windows(app);
-  for (GList *item = windows; item != NULL; item = item->next)
-  {
-    if (MARKER_IS_WINDOW(item->data))
-    {
-      MarkerWindow *window = item->data;
-      marker_window_refresh_all_preview(window);
-    }
-  }
+  GtkApplication *application = marker_get_app ();
+
+  if (application == NULL ||
+      (settings == prefs.preview_settings &&
+       g_str_equal (key, "preview-zoom-level")))
+    return;
+  for (GList *item = gtk_application_get_windows (application);
+       item != NULL; item = item->next)
+    if (MARKER_IS_WINDOW (item->data))
+      marker_window_apply_prefs (MARKER_WINDOW (item->data));
 }
 
 static void
-apply_theme (void)
-{
-  g_object_set (gtk_settings_get_default (), "gtk-application-prefer-dark-theme",
-                marker_prefs_get_use_dark_theme (), NULL);
-  update_editors ();
-  refresh_preview ();
-}
-
-static void
-system_theme_changed (GObject *object, gpointer detail, gpointer data)
+system_theme_changed_cb (AdwStyleManager *manager,
+                         GParamSpec      *pspec,
+                         gpointer         user_data)
 {
   if (marker_prefs_get_follow_system_theme ())
-    apply_theme ();
+    preference_changed_cb (prefs.window_settings, "follow-system-theme", NULL);
 }
 
-static void
-theme_setting_changed (GSettings *settings, const gchar *key, gpointer data)
+void
+marker_prefs_load (void)
 {
-  if (g_str_equal (key, "enable-dark-mode") || g_str_equal (key, "follow-system-theme"))
-    apply_theme ();
+  gboolean existing;
+
+  if (prefs.editor_settings != NULL)
+    return;
+
+  prefs.editor_settings = g_settings_new ("com.github.fabiocolacio.marker.preferences.editor");
+  prefs.preview_settings = g_settings_new ("com.github.fabiocolacio.marker.preferences.preview");
+  prefs.window_settings = g_settings_new ("com.github.fabiocolacio.marker.preferences.window");
+  desktop_settings = g_settings_new ("org.gnome.desktop.interface");
+
+  existing = has_existing_profile ();
+  if (!g_settings_get_boolean (prefs.window_settings, "profile-initialized"))
+    {
+      if (!existing)
+        g_settings_set_enum (prefs.window_settings, "view-mode", FORMATTED_MODE);
+      g_settings_set_boolean (prefs.window_settings, "profile-initialized", TRUE);
+    }
+
+  g_signal_connect (prefs.window_settings, "changed::enable-dark-mode",
+                    G_CALLBACK (theme_setting_changed_cb), NULL);
+  g_signal_connect (prefs.window_settings, "changed::follow-system-theme",
+                    G_CALLBACK (theme_setting_changed_cb), NULL);
+  g_signal_connect (prefs.editor_settings, "changed",
+                    G_CALLBACK (preference_changed_cb), NULL);
+  g_signal_connect (prefs.preview_settings, "changed",
+                    G_CALLBACK (preference_changed_cb), NULL);
+  g_signal_connect (adw_style_manager_get_default (), "notify::dark",
+                    G_CALLBACK (system_theme_changed_cb), NULL);
+  apply_color_scheme ();
 }
 
-static void
-portal_color_scheme_changed (GVariant *setting)
+static AdwPreferencesGroup *
+add_group (AdwPreferencesPage *page,
+           const char         *title)
 {
-  g_autoptr (GVariant) value = g_variant_ref (setting);
-  while (g_variant_is_of_type (value, G_VARIANT_TYPE_VARIANT)) {
-    GVariant *inner = g_variant_get_variant (value);
-    g_variant_unref (value);
-    value = inner;
-  }
-  system_color_scheme = g_variant_is_of_type (value, G_VARIANT_TYPE_UINT32)
-    ? g_variant_get_uint32 (value) : 0;
-  system_theme_changed (NULL, NULL, NULL);
+  AdwPreferencesGroup *group = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+  adw_preferences_group_set_title (group, title);
+  adw_preferences_page_add (page, group);
+  return group;
 }
 
-static void
-portal_setting_changed (GDBusProxy *proxy, const gchar *sender,
-                        const gchar *signal, GVariant *parameters, gpointer data)
+static AdwSwitchRow *
+add_switch (AdwPreferencesGroup *group,
+            GSettings           *settings,
+            const char          *key,
+            const char          *title,
+            const char          *subtitle)
 {
-  if (g_str_equal (signal, "SettingChanged")) {
-    const gchar *name, *key;
-    g_autoptr (GVariant) value = NULL;
-    g_variant_get (parameters, "(&s&sv)", &name, &key, &value);
-    if (g_str_equal (name, "org.freedesktop.appearance") && g_str_equal (key, "color-scheme"))
-      portal_color_scheme_changed (value);
-  }
+  AdwSwitchRow *row = ADW_SWITCH_ROW (adw_switch_row_new ());
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+  if (subtitle != NULL)
+    adw_action_row_set_subtitle (ADW_ACTION_ROW (row), subtitle);
+  adw_preferences_group_add (group, GTK_WIDGET (row));
+  g_settings_bind (settings, key, row, "active", G_SETTINGS_BIND_DEFAULT);
+  return row;
 }
 
-static void
-portal_theme_read (GObject *object, GAsyncResult *result, gpointer data)
+static AdwSpinRow *
+add_spin (AdwPreferencesGroup *group,
+          GSettings           *settings,
+          const char          *key,
+          const char          *title,
+          double               lower,
+          double               upper,
+          double               step)
 {
-  g_autoptr (GVariant) reply = g_dbus_proxy_call_finish (G_DBUS_PROXY (object), result, NULL);
-  if (reply != NULL) {
-    g_autoptr (GVariant) value = g_variant_get_child_value (reply, 0);
-    portal_color_scheme_changed (value);
-  }
-}
-
-static void
-read_portal_theme (GDBusProxy *portal, GParamSpec *property, gpointer data)
-{
-  system_color_scheme = 0;
-  g_autofree gchar *owner = g_dbus_proxy_get_name_owner (portal);
-  if (owner != NULL)
-    g_dbus_proxy_call (portal, "Read", g_variant_new ("(ss)", "org.freedesktop.appearance", "color-scheme"),
-                       G_DBUS_CALL_FLAGS_NONE, 2000, NULL, portal_theme_read, NULL);
-  else
-    system_theme_changed (NULL, NULL, NULL);
-}
-
-static void
-portal_ready (GObject *object, GAsyncResult *result, gpointer data)
-{
-  appearance_portal = g_dbus_proxy_new_for_bus_finish (result, NULL);
-  if (appearance_portal != NULL) {
-    g_signal_connect (appearance_portal, "g-signal", G_CALLBACK (portal_setting_changed), NULL);
-    g_signal_connect (appearance_portal, "notify::g-name-owner", G_CALLBACK (read_portal_theme), NULL);
-    read_portal_theme (appearance_portal, NULL, NULL);
-  }
-}
-
-static void
-preview_setting_changed (GSettings *settings, const gchar *key, gpointer data)
-{
-  if (g_str_equal (key, "gnuplot-toggle") || g_str_has_suffix (key, "-font"))
-    refresh_preview ();
-}
-
-static void
-editor_font_changed (GSettings *settings, const gchar *key, gpointer data)
-{
-  update_editors ();
+  AdwSpinRow *row = ADW_SPIN_ROW (adw_spin_row_new_with_range (lower, upper, step));
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+  adw_preferences_group_add (group, GTK_WIDGET (row));
+  g_settings_bind (settings, key, row, "value", G_SETTINGS_BIND_DEFAULT);
+  return row;
 }
 
 static gboolean
-monospace_font_filter (const PangoFontFamily *family, const PangoFontFace *face, gpointer data)
-{
-  return pango_font_family_is_monospace ((PangoFontFamily *) family);
-}
-
-static void
-editor_font_chosen (GtkFontButton *button, gpointer data)
-{
-  g_autofree gchar *font = gtk_font_chooser_get_font (GTK_FONT_CHOOSER (button));
-  marker_prefs_set_editor_font (font);
-}
-
-static void
-show_line_numbers_toggled(GtkToggleButton* button,
-                          gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_show_line_numbers(state);
-  update_editors ();
-}
-
-static void
-editor_syntax_toggled(GtkToggleButton* button,
-                      gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_use_syntax_theme(state);
-
-  marker_prefs_set_use_highlight(state);
-  if (user_data)
-  {
-    gtk_widget_set_sensitive(GTK_WIDGET(user_data), state);
-  }
-
-  update_editors ();
-}
-
-static void
-css_toggled(GtkToggleButton* button,
-            gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_use_css_theme(state);
-
-  if (user_data)
-  {
-    gtk_widget_set_sensitive(GTK_WIDGET(user_data), state);
-  }
-
-  refresh_preview();
-}
-
-static void
-highlight_current_line_toggled(GtkToggleButton* button,
-                               gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_highlight_current_line(state);
-  update_editors ();
-}
-
-static void
-enable_mathjs_toggled(GtkToggleButton* button,
-                       gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_use_mathjs(state);
-  if (user_data)
-    gtk_widget_set_sensitive(GTK_WIDGET(user_data), state);
-  refresh_preview();
-}
-
-static void
-enable_mermaid_toggled(GtkToggleButton* button,
-                       gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_use_mermaid(state);
-  refresh_preview();
-}
-
-static void
-enable_charter_toggled(GtkToggleButton* button,
-                       gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_use_charter(state);
-  refresh_preview();
-}
-
-static void
-wrap_text_toggled(GtkToggleButton* button,
-                  gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_wrap_text(state);
-  update_editors ();
-}
-
-static void
-show_spaces_toggled(GtkToggleButton* button,
-                    gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_show_spaces(state);
-  update_editors ();
-}
-
-static void
-enable_dark_mode_toggled(GtkToggleButton* button,
-                         gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_use_dark_theme(state);
-}
-
-static void
-auto_indent_toggled(GtkToggleButton* button,
-                    gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_auto_indent(state);
-  update_editors ();
-}
-
-static void
-spell_lang_chosen(GtkComboBox* combo_box,
-              gpointer     user_data)
-{
-  char* choice = marker_widget_combo_box_get_active_str(combo_box);
-  marker_prefs_set_spell_check_language(choice);
-  update_editors ();
-}
-
-static void
-spell_check_toggled(GtkToggleButton* button,
-                     gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_spell_check(state);
-
-  if (user_data)
-  {
-    gtk_widget_set_sensitive(GTK_WIDGET(user_data), state);
-  }
-
-  update_editors ();
-}
-
-static void
-replace_tabs_toggled(GtkToggleButton* button,
-                     gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_replace_tabs(state);
-  update_editors ();
-}
-
-static void
-tab_width_value_changed(GtkSpinButton *spin_button,
-                        gpointer       user_data)
-{
-  guint value = gtk_spin_button_get_value_as_int (spin_button);
-  marker_prefs_set_tab_width(value);
-  update_editors ();
-}
-
-static void
-right_margin_position_value_changed(GtkSpinButton* spin_button,
-                                    gpointer       user_data)
-{
-  guint value = gtk_spin_button_get_value_as_int(spin_button);
-  marker_prefs_set_right_margin_position(value);
-  update_editors ();
-}
-
-static void
-show_right_margin_toggled(GtkToggleButton* button,
-                          gpointer         user_data)
-{
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_show_right_margin(state);
-
-  if (user_data)
-  {
-    gtk_widget_set_sensitive(GTK_WIDGET(user_data), state);
-  }
-
-  update_editors ();
-}
-
-static void
-syntax_chosen(GtkComboBox* combo_box,
-              gpointer     user_data)
-{
-  g_autofree gchar* choice = marker_widget_combo_box_get_active_str(combo_box);
-  marker_prefs_set_syntax_theme (choice);
-  update_editors ();
-}
-
-static void
-css_chosen(GtkComboBox* combo_box,
-           gpointer     user_data)
-{
-  char* choice = marker_widget_combo_box_get_active_str(combo_box);
-
-  marker_prefs_set_css_theme(choice);
-
-  free(choice);
-  refresh_preview();
-}
-
-static void
-highlight_css_chosen(GtkComboBox* combo_box,
-                     gpointer     user_data)
-{
-  char* choice = marker_widget_combo_box_get_active_str(combo_box);
-  marker_prefs_set_highlight_theme(choice);
-
-  free(choice);
-
-  refresh_preview();
-}
-
-static void
-code_highlight_toggled(GtkToggleButton* button,
+monospace_font_filter (gpointer item,
                        gpointer user_data)
 {
-  gboolean state = gtk_toggle_button_get_active(button);
-  marker_prefs_set_use_highlight(state);
+  return PANGO_IS_FONT_FAMILY (item) && pango_font_family_is_monospace (item);
+}
 
-  if (user_data)
-  {
-    gtk_widget_set_sensitive(GTK_WIDGET(user_data), state);
-  }
+typedef struct
+{
+  GSettings *settings;
+  char *key;
+} FontBinding;
 
-  refresh_preview();
+static void
+font_binding_free (FontBinding *binding)
+{
+  g_free (binding->key);
+  g_free (binding);
 }
 
 static void
-default_view_mode_chosen(GtkComboBox* combo_box,
-                         gpointer     user_data)
+font_binding_closure_free (gpointer  data,
+                           GClosure *closure)
 {
-  MarkerViewMode mode = gtk_combo_box_get_active(combo_box);
-  marker_prefs_set_default_view_mode(mode);
+  font_binding_free (data);
 }
 
 static void
-math_backend_changed (GtkComboBox* combo_box,
+font_changed_cb (GtkFontDialogButton *button,
+                 GParamSpec          *pspec,
+                 FontBinding         *binding)
+{
+  const PangoFontDescription *description = gtk_font_dialog_button_get_font_desc (button);
+  g_autofree char *font = pango_font_description_to_string (description);
+  g_settings_set_string (binding->settings, binding->key, font);
+}
+
+static GtkWidget *
+add_font (AdwPreferencesGroup *group,
+          GSettings           *settings,
+          const char          *key,
+          const char          *title,
+          gboolean             monospace)
+{
+  AdwActionRow *row = ADW_ACTION_ROW (adw_action_row_new ());
+  GtkFontDialog *dialog = gtk_font_dialog_new ();
+  GtkWidget *button = gtk_font_dialog_button_new (dialog);
+  g_autofree char *font = g_settings_get_string (settings, key);
+  g_autoptr (PangoFontDescription) description = NULL;
+  FontBinding *binding = g_new0 (FontBinding, 1);
+
+  if (*font == '\0' && settings == prefs.editor_settings && g_str_equal (key, "font"))
+    {
+      g_free (g_steal_pointer (&font));
+      font = marker_prefs_get_editor_font ();
+    }
+  description = pango_font_description_from_string (font);
+
+  if (monospace)
+    {
+      GtkFilter *filter = GTK_FILTER (gtk_custom_filter_new (monospace_font_filter, NULL, NULL));
+      gtk_font_dialog_set_filter (dialog, filter);
+      g_object_unref (filter);
+    }
+
+  gtk_font_dialog_button_set_font_desc (GTK_FONT_DIALOG_BUTTON (button), description);
+  gtk_font_dialog_button_set_use_font (GTK_FONT_DIALOG_BUTTON (button), TRUE);
+  gtk_widget_set_valign (button, GTK_ALIGN_CENTER);
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+  adw_action_row_add_suffix (row, button);
+  adw_action_row_set_activatable_widget (row, button);
+  adw_preferences_group_add (group, GTK_WIDGET (row));
+
+  binding->settings = settings;
+  binding->key = g_strdup (key);
+  g_signal_connect_data (button, "notify::font-desc", G_CALLBACK (font_changed_cb),
+                         binding, font_binding_closure_free, 0);
+  return GTK_WIDGET (row);
+}
+
+static AdwComboRow *
+add_combo (AdwPreferencesGroup *group,
+           const char *const   *items,
+           const char          *title,
+           guint                selected)
+{
+  GtkStringList *model = gtk_string_list_new (items);
+  AdwComboRow *row = ADW_COMBO_ROW (adw_combo_row_new ());
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+  adw_combo_row_set_model (row, G_LIST_MODEL (model));
+  adw_combo_row_set_selected (row, selected);
+  adw_preferences_group_add (group, GTK_WIDGET (row));
+  g_object_unref (model);
+  return row;
+}
+
+static void
+view_mode_changed_cb (AdwComboRow *row,
+                      GParamSpec  *pspec,
+                      gpointer     user_data)
+{
+  marker_prefs_set_default_view_mode (adw_combo_row_get_selected (row));
+}
+
+static void
+math_backend_changed_cb (AdwComboRow *row,
+                         GParamSpec  *pspec,
                          gpointer     user_data)
 {
-  MarkerMathBackEnd backend = gtk_combo_box_get_active(combo_box);
-  marker_prefs_set_math_backend(backend);
-  refresh_preview();
+  marker_prefs_set_math_backend (adw_combo_row_get_selected (row));
 }
 
-void
-marker_prefs_show_window()
+static void
+add_preview_font_override (AdwPreferencesGroup *group,
+                           const char          *role,
+                           const char          *title,
+                           gboolean             monospace)
 {
-  GtkBuilder* builder =
-    gtk_builder_new_from_resource(
-      "/com/github/fabiocolacio/marker/ui/marker-prefs-window.ui");
+  g_autofree char *toggle = g_strdup_printf ("override-%s-font", role);
+  g_autofree char *key = g_strdup_printf ("%s-font", role);
+  AdwSwitchRow *switch_row = add_switch (group, prefs.preview_settings, toggle,
+                                         title, "Use a custom font in the rendered preview");
+  GtkWidget *font_row = add_font (group, prefs.preview_settings, key, "Font", monospace);
 
-  GList *list = NULL;
-  GtkComboBox* combo_box;
-  GtkToggleButton* check_button;
-  GtkSpinButton* spin_button;
-
-  GtkFontChooser *editor_font = GTK_FONT_CHOOSER (gtk_builder_get_object (builder, "editor_font_button"));
-  gtk_font_chooser_set_filter_func (editor_font, monospace_font_filter, NULL, NULL);
-  g_autofree gchar *font = marker_prefs_get_editor_font ();
-  gtk_font_chooser_set_font (editor_font, font);
-  g_signal_connect (editor_font, "font-set", G_CALLBACK (editor_font_chosen), NULL);
-
-  const gchar *roles[] = {"header", "math", "code", "text"};
-  for (guint i = 0; i < G_N_ELEMENTS (roles); i++) {
-    g_autofree gchar *font_key = g_strdup_printf ("%s-font", roles[i]);
-    g_autofree gchar *enabled_key = g_strdup_printf ("override-%s-font", roles[i]);
-    g_autofree gchar *button_id = g_strdup_printf ("%s_font_button", roles[i]);
-    g_autofree gchar *toggle_id = g_strdup_printf ("%s_font_check_button", roles[i]);
-    GObject *button = gtk_builder_get_object (builder, button_id);
-    g_settings_bind (prefs.preview_settings, font_key, button, "font", G_SETTINGS_BIND_DEFAULT);
-    g_settings_bind (prefs.preview_settings, enabled_key, button, "sensitive", G_SETTINGS_BIND_GET);
-    g_settings_bind (prefs.preview_settings, enabled_key,
-                     gtk_builder_get_object (builder, toggle_id), "active", G_SETTINGS_BIND_DEFAULT);
-  }
-  g_settings_bind (prefs.preview_settings, "gnuplot-toggle",
-                   gtk_builder_get_object (builder, "gnuplot_check_button"), "active", G_SETTINGS_BIND_DEFAULT);
-  g_settings_bind (prefs.window_settings, "follow-system-theme",
-                   gtk_builder_get_object (builder, "follow_system_theme_check_button"), "active", G_SETTINGS_BIND_DEFAULT);
-  g_settings_bind (prefs.window_settings, "follow-system-theme",
-                   gtk_builder_get_object (builder, "enable_dark_mode_check_button"), "sensitive",
-                   G_SETTINGS_BIND_GET | G_SETTINGS_BIND_INVERT_BOOLEAN);
-
-  combo_box = GTK_COMBO_BOX(gtk_builder_get_object(builder, "syntax_chooser"));
-  list = marker_prefs_get_available_syntax_themes();
-  marker_widget_populate_combo_box_with_strings(combo_box, list);
-  char* syntax = marker_prefs_get_syntax_theme();
-  marker_widget_combo_box_set_active_str(combo_box,syntax, g_list_length(list));
-  gtk_widget_set_sensitive(GTK_WIDGET(combo_box), marker_prefs_get_use_highlight());
-  g_free(syntax);
-  g_list_free_full(list, free);
-  list = NULL;
-
-  combo_box = GTK_COMBO_BOX(gtk_builder_get_object(builder, "css_chooser"));
-  list = marker_prefs_get_available_stylesheets();
-  marker_widget_populate_combo_box_with_strings(combo_box, list);
-  char* css = marker_prefs_get_css_theme();
-  char* css_filename = marker_string_filename_get_name(css);
-  marker_widget_combo_box_set_active_str(combo_box, css_filename, g_list_length(list));
-  gtk_widget_set_sensitive(GTK_WIDGET(combo_box), marker_prefs_get_use_css_theme());
-  free(css_filename);
-  g_free(css);
-  g_list_free_full(list, free);
-  list = NULL;
-
-  combo_box = GTK_COMBO_BOX(gtk_builder_get_object(builder, "highlight_css_chooser"));
-  list = marker_prefs_get_available_highlight_themes();
-  marker_widget_populate_combo_box_with_strings(combo_box, list);
-  char* theme = marker_prefs_get_highlight_theme();
-  marker_widget_combo_box_set_active_str(combo_box, theme, g_list_length(list));
-  gtk_widget_set_sensitive(GTK_WIDGET(combo_box), marker_prefs_get_use_highlight());
-  g_free(theme);
-  g_list_free_full(list, free);
-  list = NULL;
-
-  combo_box = GTK_COMBO_BOX(gtk_builder_get_object(builder, "view_mode_chooser"));
-  GtkCellRenderer* cell_renderer = gtk_cell_renderer_text_new();
-  gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(combo_box), cell_renderer, TRUE);
-  gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(combo_box),
-                                 cell_renderer,
-                                 "text", 0,
-                                 NULL);
-  gtk_combo_box_set_active(combo_box, marker_prefs_get_default_view_mode());
-
-  combo_box = GTK_COMBO_BOX(gtk_builder_get_object(builder, "math_backends_combo"));
-  cell_renderer = gtk_cell_renderer_text_new();
-  gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(combo_box), cell_renderer, TRUE);
-  gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(combo_box),
-                                 cell_renderer,
-                                 "text", 0,
-                                 NULL);
-  gtk_combo_box_set_active(combo_box, marker_prefs_get_math_backend());
-  gtk_widget_set_sensitive(GTK_WIDGET(combo_box), marker_prefs_get_use_mathjs());
-
-  combo_box = GTK_COMBO_BOX(gtk_builder_get_object(builder, "spell_lang_chooser"));
-  list = marker_prefs_get_available_languages();
-  marker_widget_populate_combo_box_with_strings(combo_box, list);
-  char* lang = marker_prefs_get_spell_check_language();
-  marker_widget_combo_box_set_active_str(combo_box, lang, g_list_length(list));
-  gtk_widget_set_sensitive(GTK_WIDGET(combo_box), marker_prefs_get_spell_check());
-  g_free(lang);
-  g_list_free_full(list, free);
-  list = NULL;
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "editor_syntax_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_use_highlight());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "css_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_use_css_theme());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "editor_syntax_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_use_syntax_theme());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "mathjs_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_use_mathjs());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "mermaid_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_use_mermaid());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "charter_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_use_charter());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "code_highlight_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_use_highlight());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "show_line_numbers_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_show_line_numbers());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "show_right_margin_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_show_right_margin());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "wrap_text_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_wrap_text());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "show_spaces_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_show_spaces());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "highlight_current_line_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_highlight_current_line());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "auto_indent_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_auto_indent());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "replace_tabs_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_replace_tabs());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "spell_check_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_spell_check());
-
-  check_button =
-    GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "enable_dark_mode_check_button"));
-  gtk_toggle_button_set_active(check_button, g_settings_get_boolean (prefs.window_settings, "enable-dark-mode"));
-
-  spin_button =
-    GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "right_margin_position_spin_button"));
-  gtk_widget_set_sensitive(GTK_WIDGET(spin_button), marker_prefs_get_show_right_margin());
-  gtk_spin_button_set_range(spin_button, 1, 1000);
-  gtk_spin_button_set_increments(spin_button, 1, 0);
-  gtk_spin_button_set_value(spin_button, marker_prefs_get_right_margin_position());
-
-  spin_button =
-    GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "tab_width_spin_button"));
-  gtk_spin_button_set_range(spin_button, 1, 12);
-  gtk_spin_button_set_increments(spin_button, 1, 0);
-  gtk_spin_button_set_value(spin_button, marker_prefs_get_tab_width());
-
-  GtkWindow* window = GTK_WINDOW(gtk_builder_get_object(builder, "prefs_win"));
-
-  gtk_window_set_transient_for (window, gtk_application_get_active_window (marker_get_app ()));
-	gtk_widget_show_all(GTK_WIDGET(window));
-  gtk_window_present(window);
-
-
-  gtk_builder_add_callback_symbol(builder,
-                                  "syntax_chosen",
-                                  G_CALLBACK(syntax_chosen));
-  gtk_builder_add_callback_symbol(builder,
-                                  "editor_syntax_toggled",
-                                  G_CALLBACK(editor_syntax_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "css_chosen",
-                                  G_CALLBACK(css_chosen));
-  gtk_builder_add_callback_symbol(builder,
-                                  "css_toggled",
-                                  G_CALLBACK(css_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "highlight_css_chosen",
-                                  G_CALLBACK(highlight_css_chosen));
-  gtk_builder_add_callback_symbol(builder,
-                                  "code_highlight_toggled",
-                                  G_CALLBACK(code_highlight_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "default_view_mode_chosen",
-                                  G_CALLBACK(default_view_mode_chosen));
-  gtk_builder_add_callback_symbol(builder,
-                                  "math_backends_combo_changed_cb",
-                                  G_CALLBACK(math_backend_changed));
-  gtk_builder_add_callback_symbol(builder,
-                                  "show_line_numbers_toggled",
-                                  G_CALLBACK(show_line_numbers_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "highlight_current_line_toggled",
-                                  G_CALLBACK(highlight_current_line_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "replace_tabs_toggled",
-                                  G_CALLBACK(replace_tabs_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "auto_indent_toggled",
-                                  G_CALLBACK(auto_indent_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "spell_check_toggled",
-                                  G_CALLBACK(spell_check_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "spell_lang_chosen",
-                                  G_CALLBACK(spell_lang_chosen));
-  gtk_builder_add_callback_symbol(builder,
-                                  "tab_width_value_changed",
-                                  G_CALLBACK(tab_width_value_changed));
-  gtk_builder_add_callback_symbol(builder,
-                                  "right_margin_position_value_changed",
-                                  G_CALLBACK(right_margin_position_value_changed));
-  gtk_builder_add_callback_symbol(builder,
-                                  "enable_mathjs_toggled",
-                                  G_CALLBACK(enable_mathjs_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "enable_mermaid_toggled",
-                                  G_CALLBACK(enable_mermaid_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "wrap_text_toggled",
-                                  G_CALLBACK(wrap_text_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "show_spaces_toggled",
-                                  G_CALLBACK(show_spaces_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "show_right_margin_toggled",
-                                  G_CALLBACK(show_right_margin_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "enable_dark_mode_toggled",
-                                  G_CALLBACK(enable_dark_mode_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "editor_syntax_toggled",
-                                  G_CALLBACK(editor_syntax_toggled));
-  gtk_builder_add_callback_symbol(builder,
-                                  "enable_charter_toggled",
-                                  G_CALLBACK(enable_charter_toggled));
-  gtk_builder_connect_signals(builder, NULL);
-
-  g_object_unref(builder);
+  g_object_bind_property (switch_row, "active", font_row, "sensitive",
+                          G_BINDING_SYNC_CREATE);
 }
 
-void
-marker_prefs_load()
+static void
+theme_file_finished (GObject *object, GAsyncResult *result, gpointer data)
 {
-  if (prefs.editor_settings != NULL)
+  g_autoptr (AdwActionRow) row = data;
+  g_autoptr (GFile) file = gtk_file_dialog_open_finish (GTK_FILE_DIALOG (object), result, NULL);
+  if (file == NULL)
     return;
-  prefs.editor_settings =
-    g_settings_new("com.github.fabiocolacio.marker.preferences.editor");
-  prefs.preview_settings =
-    g_settings_new("com.github.fabiocolacio.marker.preferences.preview");
-  prefs.window_settings =
-    g_settings_new("com.github.fabiocolacio.marker.preferences.window");
-  desktop_settings = g_settings_new ("org.gnome.desktop.interface");
-  g_signal_connect (prefs.editor_settings, "changed::font", G_CALLBACK (editor_font_changed), NULL);
-  g_signal_connect (prefs.preview_settings, "changed", G_CALLBACK (preview_setting_changed), NULL);
-  g_signal_connect (prefs.window_settings, "changed", G_CALLBACK (theme_setting_changed), NULL);
-  g_signal_connect (desktop_settings, "changed::color-scheme", G_CALLBACK (system_theme_changed), NULL);
-  g_signal_connect (desktop_settings, "changed::gtk-theme", G_CALLBACK (system_theme_changed), NULL);
-  g_signal_connect (gtk_settings_get_default (), "notify::gtk-theme-name", G_CALLBACK (system_theme_changed), NULL);
-  g_dbus_proxy_new_for_bus (G_BUS_TYPE_SESSION,
-                            G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES | G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
-                            NULL, "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
-                            "org.freedesktop.portal.Settings", NULL, portal_ready, NULL);
-  apply_theme ();
+  g_autofree char *path = g_file_get_path (file);
+  if (path != NULL)
+    {
+      marker_prefs_set_css_theme (path);
+      adw_action_row_set_subtitle (row, path);
+    }
 }
 
+static void
+choose_theme_file (GtkButton *button, AdwActionRow *row)
+{
+  GtkFileDialog *dialog = gtk_file_dialog_new ();
+  GtkFileFilter *filter = gtk_file_filter_new ();
+  g_autoptr (GListStore) filters = g_list_store_new (GTK_TYPE_FILE_FILTER);
+  gtk_file_filter_add_pattern (filter, "*.css");
+  gtk_file_filter_set_name (filter, "CSS stylesheets");
+  g_list_store_append (filters, filter);
+  gtk_file_dialog_set_filters (dialog, G_LIST_MODEL (filters));
+  gtk_file_dialog_set_title (dialog, "Choose Preview Theme");
+  gtk_file_dialog_open (dialog, GTK_WINDOW (gtk_widget_get_root (GTK_WIDGET (button))), NULL,
+                        theme_file_finished, g_object_ref (row));
+  g_object_unref (filter);
+  g_object_unref (dialog);
+}
+
+static void
+theme_selected (AdwComboRow *row, GParamSpec *pspec, gpointer data)
+{
+  GtkStringList *model = GTK_STRING_LIST (adw_combo_row_get_model (row));
+  const char *theme = gtk_string_list_get_string (model, adw_combo_row_get_selected (row));
+  if (theme != NULL)
+    marker_prefs_set_css_theme (theme);
+}
+
+static void
+theme_setting_changed (GSettings *settings, const char *key, AdwComboRow *row)
+{
+  g_autofree char *current = g_settings_get_string (settings, key);
+  GtkStringList *themes = GTK_STRING_LIST (adw_combo_row_get_model (row));
+  guint count = g_list_model_get_n_items (G_LIST_MODEL (themes));
+  guint selected = count;
+  for (guint i = 0; i < count; i++)
+    if (g_str_equal (current, gtk_string_list_get_string (themes, i)))
+      { selected = i; break; }
+  if (selected == count)
+    gtk_string_list_append (themes, current);
+  adw_combo_row_set_selected (row, selected);
+}
+
+static void
+add_theme_chooser (AdwPreferencesGroup *group)
+{
+  g_autofree char *current = marker_prefs_get_css_theme ();
+  g_autoptr (GtkStringList) themes = gtk_string_list_new (NULL);
+  g_autoptr (GDir) directory = g_dir_open (STYLES_DIR, 0, NULL);
+  const char *name;
+  guint selected = GTK_INVALID_LIST_POSITION;
+  while (directory != NULL && (name = g_dir_read_name (directory)) != NULL)
+    if (g_str_has_suffix (name, ".css"))
+      {
+        if (g_str_equal (current, name))
+          selected = g_list_model_get_n_items (G_LIST_MODEL (themes));
+        gtk_string_list_append (themes, name);
+      }
+  if (selected == GTK_INVALID_LIST_POSITION)
+    {
+      selected = g_list_model_get_n_items (G_LIST_MODEL (themes));
+      gtk_string_list_append (themes, current);
+    }
+  AdwComboRow *combo = ADW_COMBO_ROW (adw_combo_row_new ());
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (combo), "Preview theme");
+  adw_combo_row_set_model (combo, G_LIST_MODEL (themes));
+  adw_combo_row_set_selected (combo, selected);
+  g_signal_connect (combo, "notify::selected", G_CALLBACK (theme_selected), NULL);
+  g_signal_connect_object (prefs.preview_settings, "changed::css-theme", G_CALLBACK (theme_setting_changed), combo, 0);
+  adw_preferences_group_add (group, GTK_WIDGET (combo));
+  AdwActionRow *custom = ADW_ACTION_ROW (adw_action_row_new ());
+  adw_preferences_row_set_title (ADW_PREFERENCES_ROW (custom), "Custom stylesheet");
+  adw_action_row_set_subtitle (custom, current);
+  g_settings_bind (prefs.preview_settings, "css-theme", custom, "subtitle", G_SETTINGS_BIND_GET);
+  GtkWidget *button = gtk_button_new_with_label ("Choose…");
+  gtk_widget_set_valign (button, GTK_ALIGN_CENTER);
+  adw_action_row_add_suffix (custom, button);
+  adw_action_row_set_activatable_widget (custom, button);
+  g_signal_connect (button, "clicked", G_CALLBACK (choose_theme_file), custom);
+  adw_preferences_group_add (group, GTK_WIDGET (custom));
+}
+
+void
+marker_prefs_show_window (void)
+{
+  GtkWindow *parent;
+  AdwPreferencesPage *editor_page;
+  AdwPreferencesPage *preview_page;
+  AdwPreferencesPage *window_page;
+  AdwPreferencesGroup *group;
+  AdwComboRow *combo;
+  static const char *const view_modes[] = {
+    "Editor Only", "Preview Only", "Dual Pane", "Dual Window", "Formatted Markdown", NULL
+  };
+  static const char *const math_backends[] = { "KaTeX", "MathJax", NULL };
+
+  if (preferences_dialog != NULL)
+    {
+      adw_dialog_present (preferences_dialog,
+                          GTK_WIDGET (gtk_application_get_active_window (marker_get_app ())));
+      return;
+    }
+
+  preferences_dialog = adw_preferences_dialog_new ();
+  g_object_add_weak_pointer (G_OBJECT (preferences_dialog), (gpointer *) &preferences_dialog);
+  adw_dialog_set_title (preferences_dialog, "Preferences");
+  adw_dialog_set_content_width (preferences_dialog, 680);
+  adw_dialog_set_content_height (preferences_dialog, 720);
+
+  editor_page = ADW_PREFERENCES_PAGE (adw_preferences_page_new ());
+  adw_preferences_page_set_title (editor_page, "Editor");
+  adw_preferences_page_set_icon_name (editor_page, "document-edit-symbolic");
+  group = add_group (editor_page, "Text");
+  add_font (group, prefs.editor_settings, "font", "Editor font", TRUE);
+  add_switch (group, prefs.editor_settings, "show-line-numbers", "Line numbers", NULL);
+  add_switch (group, prefs.editor_settings, "highlight-current-line", "Highlight current line", NULL);
+  add_switch (group, prefs.editor_settings, "wrap-text", "Wrap long lines", NULL);
+  add_switch (group, prefs.editor_settings, "spell-check", "Spell checking", "Uses libspelling and installed dictionaries");
+  group = add_group (editor_page, "Formatted Markdown");
+  add_font (group, prefs.editor_settings, "prose-font", "Prose font", FALSE);
+  add_font (group, prefs.editor_settings, "code-font", "Code font", TRUE);
+  add_spin (group, prefs.editor_settings, "writing-width", "Writing width", 520, 1400, 20);
+  add_spin (group, prefs.editor_settings, "line-spacing", "Line spacing", 0, 16, 1);
+
+  preview_page = ADW_PREFERENCES_PAGE (adw_preferences_page_new ());
+  adw_preferences_page_set_title (preview_page, "Preview");
+  adw_preferences_page_set_icon_name (preview_page, "view-reveal-symbolic");
+  group = add_group (preview_page, "Rendering");
+  add_switch (group, prefs.preview_settings, "css-toggle", "Use preview theme", NULL);
+  add_theme_chooser (group);
+  add_switch (group, prefs.preview_settings, "mathjs-toggle", "Render mathematics", NULL);
+  combo = add_combo (group, math_backends, "Math renderer", marker_prefs_get_math_backend ());
+  g_signal_connect (combo, "notify::selected", G_CALLBACK (math_backend_changed_cb), NULL);
+  add_switch (group, prefs.preview_settings, "highlight-toggle", "Highlight code", NULL);
+  add_switch (group, prefs.preview_settings, "mermaid-toggle", "Enable Mermaid", NULL);
+  add_switch (group, prefs.preview_settings, "gnuplot-toggle", "Enable gnuplot", "Render gnuplot fenced blocks and linked data files");
+  group = add_group (preview_page, "Font overrides");
+  add_preview_font_override (group, "header", "Headings", FALSE);
+  add_preview_font_override (group, "math", "Mathematics", FALSE);
+  add_preview_font_override (group, "code", "Code blocks", TRUE);
+  add_preview_font_override (group, "text", "Body text", FALSE);
+
+  window_page = ADW_PREFERENCES_PAGE (adw_preferences_page_new ());
+  adw_preferences_page_set_title (window_page, "Window");
+  adw_preferences_page_set_icon_name (window_page, "preferences-system-windows-symbolic");
+  group = add_group (window_page, "Appearance");
+  add_switch (group, prefs.window_settings, "follow-system-theme", "Follow system theme", NULL);
+  add_switch (group, prefs.window_settings, "enable-dark-mode", "Use dark appearance", "Used when system theme following is off");
+  group = add_group (window_page, "Default view");
+  combo = add_combo (group, view_modes, "New documents open in",
+                     marker_prefs_get_default_view_mode ());
+  g_signal_connect (combo, "notify::selected", G_CALLBACK (view_mode_changed_cb), NULL);
+
+  adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (preferences_dialog), editor_page);
+  adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (preferences_dialog), preview_page);
+  adw_preferences_dialog_add (ADW_PREFERENCES_DIALOG (preferences_dialog), window_page);
+
+  parent = gtk_application_get_active_window (marker_get_app ());
+  adw_dialog_present (preferences_dialog, GTK_WIDGET (parent));
+}

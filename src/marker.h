@@ -29,6 +29,7 @@ void                 marker_create_new_window                    (void);
 void                 marker_create_new_window_from_file          (GFile              *file);
 void                 marker_create_new_window_from_workspace     (GFile              *folder);
 void                 marker_open_file                            (GFile              *file);
+void                 marker_save_session                         (void);
 void                 marker_quit                                 (void);
 void                 marker_prefs_cb                             (GSimpleAction      *action,
                                                                   GVariant           *parameter,
@@ -48,7 +49,6 @@ void                 new_cb                                      (GSimpleAction 
 void                 marker_shortcuts_cb                         (GSimpleAction      *action,
                                                                   GVariant           *parameter,
                                                                   gpointer            user_data);
-gboolean             marker_has_app_menu                         (void);
 
 extern const int APP_MENU_ACTION_ENTRIES_LEN;
 extern const GActionEntry APP_MENU_ACTION_ENTRIES[];

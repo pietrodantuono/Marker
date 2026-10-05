@@ -16,7 +16,7 @@ test_workspace_listing (void)
 {
   const gchar *expected[] = {
     "alpha-dir", "zeta", "alpha.md", "BETA.MARKDOWN", "chart.png",
-    "notes.txt", "points.DAT", "values.csv"
+    "notes.txt", "points.DAT", "values.csv", ".marker.css"
   };
   g_autofree gchar *temporary = g_dir_make_tmp ("marker-workspace-XXXXXX", NULL);
   g_autofree gchar *regular_file = NULL;
@@ -98,10 +98,73 @@ test_workspace_listing (void)
   g_rmdir (temporary);
 }
 
+typedef struct
+{
+  GMainLoop *loop;
+  gboolean loaded;
+} AsyncResult;
+
+static void
+children_changed_cb (GListModel  *model,
+                     guint        position,
+                     guint        removed,
+                     guint        added,
+                     AsyncResult *result)
+{
+  if (g_list_model_get_n_items (model) > 0)
+    {
+      result->loaded = TRUE;
+      g_main_loop_quit (result->loop);
+    }
+}
+
+static gboolean
+async_timeout_cb (gpointer user_data)
+{
+  g_main_loop_quit (((AsyncResult *) user_data)->loop);
+  return G_SOURCE_REMOVE;
+}
+
+static void
+test_workspace_async_model_lifetime (void)
+{
+  g_autofree char *temporary = g_dir_make_tmp ("marker-workspace-async-XXXXXX", NULL);
+  g_autofree char *document = g_build_filename (temporary, "notes.md", NULL);
+  g_autoptr (GFile) root_file = NULL;
+  g_autoptr (MarkerWorkspaceItem) root = NULL;
+  g_autoptr (GListModel) children = NULL;
+  g_autoptr (GMainLoop) loop = g_main_loop_new (NULL, FALSE);
+  AsyncResult result = { loop, FALSE };
+  guint timeout;
+
+  g_assert_nonnull (temporary);
+  g_assert_true (g_file_set_contents (document, "# Notes\n", -1, NULL));
+  root_file = g_file_new_for_path (temporary);
+  root = marker_workspace_item_new_root (root_file);
+  children = g_object_ref (marker_workspace_item_get_children (root));
+  g_signal_connect (children, "items-changed", G_CALLBACK (children_changed_cb),
+                    &result);
+
+  /* The tree model owns the child store; loading must remain safe after the
+   * temporary root object used to create it has gone away. */
+  g_clear_object (&root);
+  timeout = g_timeout_add_seconds (2, async_timeout_cb, &result);
+  g_main_loop_run (loop);
+  if (g_main_context_find_source_by_id (NULL, timeout) != NULL)
+    g_source_remove (timeout);
+
+  g_assert_true (result.loaded);
+  g_assert_cmpuint (g_list_model_get_n_items (children), ==, 1);
+  g_remove (document);
+  g_rmdir (temporary);
+}
+
 int
 main (int argc, char **argv)
 {
   g_test_init (&argc, &argv, NULL);
   g_test_add_func ("/workspace/listing", test_workspace_listing);
+  g_test_add_func ("/workspace/async-model-lifetime",
+                   test_workspace_async_model_lifetime);
   return g_test_run ();
 }

@@ -1,0 +1,30 @@
+/* A comfortable writing measure shared with Formatted Markdown. No editor gutters. */
+html { color-scheme: light; background: #fff; }
+body {
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 40px 24px 64px;
+  color: #303036;
+  background: #fff;
+  font-family: monospace;
+  font-size: 11pt;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.3em 0 .55em; }
+h1 { font-size: 1.75em; } h2 { font-size: 1.5em; } h3 { font-size: 1.3em; }
+h4 { font-size: 1.15em; } h5 { font-size: 1.08em; } h6 { font-size: 1em; }
+/* SciDown reserves h1 for document titles and emits Markdown H6 as h7. */
+h7 { display: block; font-size: 1em; font-weight: bold; line-height: 1.25; margin: 1.3em 0 .55em; }
+p { margin: .7em 0 1.1em; }
+pre { padding: 14px; overflow-x: auto; }
+pre, code { font-family: monospace; background: #f3f3f5; }
+pre code { background: transparent; }
+a { color: #1c71d8; }
+blockquote { margin-left: 0; padding-left: 18px; border-left: 2px solid #ccc; }
+table { border-collapse: collapse; } th, td { padding: 6px 10px; }
+img, svg { max-width: 100%; }
+@media print {
+  html, body { background: transparent; }
+  body { max-width: none; padding: 0; }
+}

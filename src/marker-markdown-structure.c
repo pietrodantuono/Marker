@@ -1,0 +1,222 @@
+/* Copyright (C) 2026 Marker contributors; SPDX-License-Identifier: GPL-3.0-or-later */
+#include "marker-markdown-structure.h"
+#include <string.h>
+
+static void
+heading_free (MarkerHeading *heading)
+{
+  g_free (heading->title);
+  g_free (heading);
+}
+
+void
+marker_markdown_structure_free (MarkerMarkdownStructure *structure)
+{
+  if (structure == NULL)
+    return;
+  g_ptr_array_unref (structure->headings);
+  g_array_unref (structure->blocks);
+  g_free (structure);
+}
+
+static void
+add_heading (MarkerMarkdownStructure *structure, guint level, guint line, guint start,
+             guint end, guint title_start, const char *title, const char *title_end, gboolean setext)
+{
+  MarkerHeading *heading = g_new0 (MarkerHeading, 1);
+  heading->level = level;
+  heading->line = line;
+  heading->start = start;
+  heading->end = end;
+  heading->title_start = title_start;
+  heading->title_end = title_start + g_utf8_pointer_to_offset (title, title_end);
+  heading->title = g_strndup (title, title_end - title);
+  heading->setext = setext;
+  g_ptr_array_add (structure->headings, heading);
+}
+
+static gboolean
+is_science (const char *start, const char *end)
+{
+  while (start < end && g_ascii_isspace (*start))
+    start++;
+  const char *word_end = start;
+  while (word_end < end && !g_ascii_isspace (*word_end))
+    word_end++;
+  g_autofree char *word = g_ascii_strdown (start, word_end - start);
+  return g_str_equal (word, "mermaid") || g_str_equal (word, "gnuplot") ||
+         g_str_equal (word, "math") || g_str_equal (word, "tex") || g_str_equal (word, "latex");
+}
+
+MarkerMarkdownStructure *
+marker_markdown_structure_parse (const char *markdown)
+{
+  MarkerMarkdownStructure *structure = g_new0 (MarkerMarkdownStructure, 1);
+  structure->headings = g_ptr_array_new_with_free_func ((GDestroyNotify) heading_free);
+  structure->blocks = g_array_new (FALSE, FALSE, sizeof (MarkerBlock));
+  g_return_val_if_fail (markdown != NULL && g_utf8_validate (markdown, -1, NULL), structure);
+  const char *line = markdown;
+  const char *previous_title = NULL;
+  const char *previous_end = NULL;
+  guint previous_start = 0, previous_title_start = 0;
+  guint offset = 0, number = 0, fence_length = 0;
+  char fence = '\0';
+  gboolean metadata = FALSE;
+  MarkerBlock block = { 0 };
+
+  while (*line != '\0')
+    {
+      const char *newline = strchr (line, '\n');
+      const char *end = newline != NULL ? newline : line + strlen (line);
+      guint line_end = offset + g_utf8_pointer_to_offset (line, end);
+      const char *content = line;
+      while (content < end && *content == ' ')
+        content++;
+      const char *trim_end = end;
+      while (trim_end > content && g_ascii_isspace (trim_end[-1]))
+        trim_end--;
+      gboolean indented = content - line >= 4 || (content < end && *content == '\t');
+      guint count = 0;
+      if (!indented && content < end && (*content == '`' || *content == '~'))
+        while (content + count < end && content[count] == *content)
+          count++;
+
+      if (number == 0 && trim_end - content == 3 && strncmp (content, "---", 3) == 0)
+        {
+          metadata = TRUE;
+          block = (MarkerBlock) { .kind = MARKER_BLOCK_METADATA, .start = offset, .opening_end = line_end, .content_start = offset };
+          previous_title = NULL;
+        }
+      else if (metadata)
+        {
+          if (trim_end - content == 3 && (strncmp (content, "---", 3) == 0 || strncmp (content, "...", 3) == 0))
+            {
+              block.end = line_end;
+              block.content_end = line_end;
+              g_array_append_val (structure->blocks, block);
+              metadata = FALSE;
+            }
+        }
+      else if (fence != '\0')
+        {
+          if (count >= fence_length && *content == fence && content + count == trim_end)
+            {
+              block.content_end = offset;
+              block.closing_start = offset;
+              block.end = line_end;
+              block.closed = TRUE;
+              g_array_append_val (structure->blocks, block);
+              fence = '\0';
+            }
+        }
+      else if (count >= 3)
+        {
+          fence = *content;
+          fence_length = count;
+          block = (MarkerBlock) { .kind = is_science (content + count, end) ? MARKER_BLOCK_SCIENCE : MARKER_BLOCK_CODE,
+            .start = offset, .opening_end = line_end, .content_start = line_end + (newline != NULL) };
+          previous_title = NULL;
+        }
+      else if (indented)
+        {
+          MarkerBlock code = { .kind = MARKER_BLOCK_CODE, .start = offset, .end = line_end,
+            .content_start = offset, .content_end = line_end };
+          g_array_append_val (structure->blocks, code);
+          previous_title = NULL;
+        }
+      else
+        {
+          guint level = 0;
+          while (content + level < end && content[level] == '#')
+            level++;
+          gboolean underline = content < trim_end && (*content == '=' || *content == '-');
+          for (const char *p = content; underline && p < trim_end; p++)
+            underline = *p == *content;
+          if (level > 0 && level <= 6 && (content + level == end || g_ascii_isspace (content[level])))
+            {
+              const char *title = content + level;
+              while (title < end && g_ascii_isspace (*title))
+                title++;
+              const char *title_end = trim_end;
+              const char *closing = title_end;
+              while (closing > title && closing[-1] == '#')
+                closing--;
+              if (closing > title && closing < title_end && g_ascii_isspace (closing[-1]))
+                {
+                  title_end = closing;
+                  while (title_end > title && g_ascii_isspace (title_end[-1]))
+                    title_end--;
+                }
+              add_heading (structure, level, number, offset, line_end,
+                            offset + g_utf8_pointer_to_offset (line, title), title, title_end, FALSE);
+              previous_title = NULL;
+            }
+          else if (underline && previous_title != NULL)
+            {
+              add_heading (structure, *content == '=' ? 1 : 2, number - 1, previous_start,
+                            line_end, previous_title_start, previous_title, previous_end, TRUE);
+              previous_title = NULL;
+            }
+          else
+            {
+              previous_title = content < trim_end && *content != '>' && !underline ? content : NULL;
+              if (content + 1 < end && strchr ("-*+", *content) != NULL && g_ascii_isspace (content[1]))
+                previous_title = NULL;
+              const char *digits = content;
+              while (digits < end && g_ascii_isdigit (*digits))
+                digits++;
+              if (digits > content && digits + 1 < end && strchr (".)", *digits) != NULL &&
+                  g_ascii_isspace (digits[1]))
+                previous_title = NULL;
+              previous_end = trim_end;
+              previous_start = offset;
+              previous_title_start = offset + g_utf8_pointer_to_offset (line, content);
+            }
+        }
+      offset = line_end + (newline != NULL);
+      number++;
+      if (newline == NULL)
+        break;
+      line = newline + 1;
+    }
+  if (fence != '\0' || metadata)
+    {
+      block.end = offset;
+      block.content_start = block.start;
+      block.content_end = offset;
+      g_array_append_val (structure->blocks, block);
+    }
+  return structure;
+}
+
+const MarkerHeading *
+marker_markdown_structure_heading_at_line (const MarkerMarkdownStructure *structure, guint line)
+{
+  for (guint i = 0; i < structure->headings->len; i++)
+    {
+      const MarkerHeading *heading = g_ptr_array_index (structure->headings, i);
+      if (heading->line == line || (heading->setext && heading->line + 1 == line))
+        return heading;
+    }
+  return NULL;
+}
+
+char *
+marker_markdown_structure_cursor_source (const char *markdown, guint cursor)
+{
+  g_autoptr (MarkerMarkdownStructure) structure = marker_markdown_structure_parse (markdown);
+  guint offset = MIN (cursor, g_utf8_strlen (markdown, -1));
+  const char *point = g_utf8_offset_to_pointer (markdown, offset);
+  while (point > markdown && point[-1] != '\n')
+    point--;
+  offset = g_utf8_pointer_to_offset (markdown, point);
+  for (guint i = 0; i < structure->blocks->len; i++)
+    {
+      MarkerBlock *block = &g_array_index (structure->blocks, MarkerBlock, i);
+      if (offset >= block->start && offset <= block->end)
+        offset = block->kind == MARKER_BLOCK_METADATA ? MIN (block->end + 1, g_utf8_strlen (markdown, -1)) : block->start;
+    }
+  point = g_utf8_offset_to_pointer (markdown, offset);
+  g_autofree char *before = g_strndup (markdown, point - markdown);
+  return g_strconcat (before, "<div id=\"cursor_pos\"></div>\n\n", point, NULL);
+}
