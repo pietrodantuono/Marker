@@ -128,13 +128,28 @@ Legend: [ ] not started; [~] in progress; [x] completed; [!] blocked.
   over SSH. SciDown/Charter/tinyexpr pointers are ancestors of their fork masters.
 - [x] Commit/push rewritten README and PR description as ebecce3f. Verify GitHub
   renders the document and loads both current screenshots; SSH publication succeeds.
-- [!] Create a pull request into fork master. User will approve and merge; no
-  automated merge. CLI/API authentication is absent and the browser is signed out.
-  Authentication requested asynchronously; title/body are in PULL_REQUEST.md and
-  a prefilled compare URL is ready. Resume with gh pr create after authentication,
-  checking for an existing matching PR first to avoid duplicates.
-- [x] Reconcile PROGRESS with documentation commit/push evidence and the remaining
-  PR authentication blocker. Reconcile it again after actual PR creation.
+- [x] User created and merged PR #1 into fork master; verified merge commit
+  40246940 and current master checkout on 2026-10-06.
+- [x] Reconcile PROGRESS with documentation publication and user merge evidence.
+
+## Local installation follow-up
+
+- [x] Verify failed command, host tools, GNOME 50 runtime/SDK, existing user app
+  and merged checkout. flatpak-builder is absent; the build never ran.
+- [!] Install host flatpak-builder/elfutils via the README prerequisite command.
+  sudo requires the user's password; provide interactive commands instead.
+- [ ] Rebuild local Flatpak repo, reinstall the user app and launch. Use && between
+  build/install so a missing tool cannot lead to an empty-repository install attempt.
+
+## Fork identity and licensing clarification (2026-10-06)
+
+- [x] Inspect application/Flatpak/schema/state identity and explain that a distinct
+  fork ID (prefer io.github.pietrodantuono.marker) needs coordinated metadata and
+  existing-profile migration; no rename performed.
+- [x] Verify gnuplot worker/command-line/SVG integration, bundled licenses and
+  provenance; correct README rendering credits and distinguish component licenses.
+- [x] Compare bundled runtime hashes and check README links/diff. Preserve inherited
+  installation tracking edits; no commit/push requested for this correction.
 
 ## Previous explicit validation deferrals
 

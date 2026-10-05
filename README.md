@@ -237,9 +237,19 @@ and scientific-document foundations that make this continuation possible.
 
 The notebook interface is inspired by [Folio](https://github.com/toolstack/Folio).
 Book geometry and notebook symbols are credited in [the icon attribution](src/resources/icons/ATTRIBUTION.md).
-Scientific rendering uses [SciDown](https://github.com/Mandarancio/scidown) and
-[Charter](https://github.com/Mandarancio/charter); the app also uses KaTeX/MathJax,
-Mermaid, highlight.js and gnuplot. Bundled components retain their own license notices.
+Scientific rendering uses [SciDown](https://github.com/Mandarancio/scidown),
+[Charter](https://github.com/Mandarancio/charter) and [gnuplot](https://www.gnuplot.info/).
+The app also uses KaTeX/MathJax, Mermaid and highlight.js.
 
-Marker is distributed under the **GNU General Public License, version 3**;
-see [LICENSE.md](LICENSE.md).
+Marker's application code is distributed under the **GNU General Public License,
+version 3**; see [LICENSE.md](LICENSE.md). Bundled third-party components retain
+their own licenses and are not all covered by Marker's GPL license.
+
+The bundled gnuplot WebAssembly runtime runs as a separate command-line program
+inside a Web Worker, receiving plot scripts/data and returning SVG output. Gnuplot
+uses its own [redistribution license](data/scripts/gnuplot/Copyright), rather than
+the GPL. Its [provenance and third-party notices](data/scripts/gnuplot/THIRD_PARTY_NOTICES.md)
+record the unmodified upstream source release and accompanying runtime licenses.
+Preserve these notices when redistributing Marker. Changes to gnuplot's own source
+must meet its additional modified-version requirements, including distributing
+patches alongside binaries and identifying the modified version and its maintainer.

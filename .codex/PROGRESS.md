@@ -1,11 +1,20 @@
 # Current status
 
-Current phase: Documentation and fork merge follow-up; Phase 6 implementation complete.
-Current task: PR creation awaits GitHub authentication; documentation is committed/pushed.
-Last completed task: ebecce3f publishes rewritten README/current screenshots/creator credits and removes donations; GitHub images load and SDK rebuild passes.
-Next task: After GitHub authentication, check for an existing matching PR and create one into fork master; user will approve and merge.
+Current phase: Local installation follow-up; feature and documentation merged.
+Current task: Install missing host flatpak-builder; sudo requires the user's password.
+Last completed task: Verified user merged PR #1 as 40246940 and checkout is master; GNOME 50 Platform/SDK and a user Marker installation exist.
+Next task: User runs sudo apt install flatpak-builder elfutils, then builder and user reinstall in sequence; launch after successful installation.
 
 # Completed
+
+- Licensing/identity clarification (2026-10-06): gnuplot is explicitly credited
+  as scientific rendering; README distinguishes GPLv3 application code from the
+  separately executed gnuplot WASM program and its own redistribution terms.
+  Worker code exchanges scripts/data and SVG through messages and calls gnuplot's
+  command-line entry point. Bundled provenance records unmodified upstream source;
+  original/runtime licenses are retained. Recommended io.github.pietrodantuono.marker
+  per Flatpak's GitHub naming conventions, with coordinated metadata/schema/profile
+  migration; no identity changes performed.
 
 - Planning: inspected the current build, architecture, project/session persistence,
   navigation, editor/preview, preferences, exports, tests, contributor instructions
@@ -76,17 +85,15 @@ Next task: After GitHub authentication, check for an existing matching PR and cr
   installation/update/uninstall, notebook/editor/styles/export usage, development,
   limits and creator/dependency credits. Current screenshots replace GTK3 captures;
   donation section and its unreferenced image are removed. Exact review description
-  is in PULL_REQUEST.md. SSH push succeeds; user will handle approval and merge.
+  is in PULL_REQUEST.md. SSH push succeeds. User created and merged PR #1;
+  merge commit 40246940 is checked out on master (2026-10-06).
 
 # In progress
 
-- PR creation only. User owns approval/merge; documentation is committed/pushed.
-- Fork SSH access works. CLI/API authentication is absent and Playwright's GitHub
-  comparison shows Sign in; an authenticated GitHub session is required to create PRs.
-
-- GitHub API authentication is unavailable (no GH_TOKEN/GITHUB_TOKEN or authenticated
-  CLI). SSH fetch/push is available. A remote PR merge requires an authenticated
-  GitHub session. Do not update master automatically: the user now owns the merge.
+- Host build-tool setup only. flatpak-builder is absent, so the attempted build
+  never ran; install subsequently reports no local repository refs. sudo -n fails
+  because a password is required. User must run the existing README prerequisite
+  command interactively; no password requested or package installation claimed.
 
 # Discovered issues
 
@@ -137,6 +144,11 @@ Next task: After GitHub authentication, check for an existing matching PR and cr
   Swiss is enabled by default and overrides the preview's base font.
 
 # Validation performed
+
+- Licensing correction: inspected bundled Copyright/provenance, worker communication
+  and packaging; checked upstream gnuplot terms and FSF aggregation guidance.
+  This is an architecture-based licensing assessment, not a new source-build audit
+  or definitive legal determination. Runtime hash and README link/diff checks pass.
 
 - README follow-up: 15 local links/anchors exist; 11 shell snippets pass bash -n.
   Current light-wide/rich-dark captures reviewed; dependencies/labels/submodule
@@ -364,12 +376,10 @@ nested markup. Keep these five tracking files as the implementation source of
 truth. Inline-rich work is committed/pushed as 144927f2. README now uses current
 light/dark captures and task-focused installation/usage/development guidance, credits
 Fabio Colacio/contributors/Folio and removes old package advertising/donations.
-Documentation is committed/pushed as ebecce3f. CLI/API authentication is absent and
-the available browser is signed out. After gh auth login, check existing PRs with
-gh pr list --repo pietrodantuono/Marker --base master --head feature/workspace-theme-preferences.
-Create a PR using PULL_REQUEST.md for its description and its first heading for the
-title. A browser alternative is the fork's compare/master...feature/workspace-theme-preferences
-page; the prepared title/body can be pasted there. User will approve and merge;
-do not merge or push directly to master. Nested renderer commits are reachable in
-the user's forks. Checkout remains on its feature branch. Authentication question
-is pending; do not invent a PR number or mark submission complete without evidence.
+Documentation is committed/pushed as ebecce3f; user merged PR #1 into master as
+40246940. Nested renderer commits are reachable in the user's forks. Checkout is
+master. The host still lacks flatpak-builder; run sudo apt install flatpak-builder
+elfutils interactively, then the README builder and flatpak install --user --reinstall
+commands. Chain build/install with && so failed builds do not trigger installation
+from an empty repository. GNOME 50 Platform/SDK and a user Marker installation are
+already present. Host tool installation is not completed because sudo needs a password.
