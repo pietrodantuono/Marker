@@ -32,6 +32,10 @@ typedef struct {
 
 gboolean             marker_prefs_get_use_dark_theme             (void);
 void                 marker_prefs_set_use_dark_theme             (gboolean            state);
+gboolean             marker_prefs_get_follow_system_theme        (void);
+void                 marker_prefs_set_follow_system_theme        (gboolean            state);
+gchar               *marker_prefs_get_editor_font                (void);
+void                 marker_prefs_set_editor_font                (const gchar        *font);
 guint                marker_prefs_get_window_width               (void);
 void                 marker_prefs_set_window_width               (guint               width);
 guint                marker_prefs_get_window_height              (void);
@@ -84,6 +88,9 @@ gboolean             marker_prefs_get_use_highlight              (void);
 void                 marker_prefs_set_use_highlight              (gboolean            state);
 gboolean             marker_prefs_get_use_mermaid                (void);
 void                 marker_prefs_set_use_mermaid                (gboolean            state);
+gboolean             marker_prefs_get_use_gnuplot                (void);
+void                 marker_prefs_set_use_gnuplot                (gboolean            state);
+gchar               *marker_prefs_get_preview_font               (const gchar        *role);
 gboolean             marker_prefs_get_use_charter                (void);
 void                 marker_prefs_set_use_charter                (gboolean            state);
 gboolean             marker_prefs_get_gnome_appmenu              (void);

@@ -1,0 +1,72 @@
+/* Keep the selected preview layout and adapt its colors to the GTK theme. */
+@media screen and (prefers-color-scheme: dark) {
+  html, body {
+    color-scheme: dark;
+    color: #deddda !important;
+    background: #1d1d1d !important;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    color: inherit !important;
+    background-color: transparent !important;
+    border-color: #5e5c64 !important;
+  }
+
+  a, a:visited {
+    color: #99c1f1 !important;
+    background-color: transparent !important;
+  }
+
+  blockquote {
+    color: #c0bfbc !important;
+    background-color: transparent !important;
+    border-color: #5e5c64 !important;
+  }
+
+  table, th, td, pre, code {
+    border-color: #5e5c64 !important;
+  }
+
+  th, td, tr {
+    color: inherit !important;
+    background-color: transparent !important;
+  }
+
+  tr:nth-child(even), pre, code, .hljs {
+    color: #deddda !important;
+    background-color: #242424 !important;
+  }
+
+  hr {
+    border-color: #5e5c64 !important;
+    background-color: #5e5c64 !important;
+  }
+
+  /* Highlight.js token colors stay readable on the dark code surface. */
+  .hljs-comment, .hljs-quote {
+    color: #9a9996 !important;
+  }
+
+  .hljs-keyword, .hljs-selector-tag, .hljs-doctag, .hljs-formula {
+    color: #dc8add !important;
+  }
+
+  .hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute,
+  .hljs-meta-string {
+    color: #8ff0a4 !important;
+  }
+
+  .hljs-number, .hljs-literal, .hljs-type, .hljs-built_in,
+  .hljs-attr, .hljs-variable, .hljs-template-variable {
+    color: #f8e45c !important;
+  }
+
+  .hljs-title, .hljs-section, .hljs-name, .hljs-symbol,
+  .hljs-bullet, .hljs-link, .hljs-meta, .hljs-selector-id {
+    color: #99c1f1 !important;
+  }
+
+  .hljs-deletion, .hljs-subst {
+    color: #f66151 !important;
+  }
+}

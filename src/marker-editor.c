@@ -686,6 +686,7 @@ marker_editor_apply_prefs (MarkerEditor *editor)
   g_assert (MARKER_IS_EDITOR (editor));
 
   GtkSourceView * const source_view = GTK_SOURCE_VIEW (marker_editor_get_source_view (editor));
+  marker_source_view_apply_font (MARKER_SOURCE_VIEW (source_view));
 
   gboolean state;
 

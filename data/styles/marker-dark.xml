@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<style-scheme id="marker-dark" name="Marker Dark" version="1.0" parent-scheme="oblivion">
+  <author>Marker contributors</author>
+  <description>Dark editor colors matching the application.</description>
+  <style name="text" foreground="#deddda" background="#1d1d1d"/>
+  <style name="cursor" foreground="#deddda"/>
+  <style name="current-line" background="#333333"/>
+  <style name="line-numbers" foreground="#9a9996" background="#242424"/>
+  <style name="current-line-number" foreground="#ffffff" background="#333333"/>
+</style-scheme>

@@ -92,7 +92,7 @@ export_html (const gchar  *markdown,
                          "Unable to render the Markdown document.");
     return FALSE;
   }
-  if (strstr (final_html, "class=\"language-gnuplot\"") == NULL)
+  if (!marker_prefs_get_use_gnuplot () || strstr (final_html, "class=\"language-gnuplot\"") == NULL)
     return g_file_set_contents (outfile, final_html, -1, error);
 
   g_autofree gchar *staging_html =

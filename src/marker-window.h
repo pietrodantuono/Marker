@@ -36,12 +36,19 @@ G_DECLARE_FINAL_TYPE (MarkerWindow, marker_window, MARKER, WINDOW, GtkApplicatio
 MarkerWindow        *marker_window_new                           (GtkApplication     *app);
 MarkerWindow        *marker_window_new_from_file                 (GtkApplication     *app,
                                                                   GFile              *file);
+MarkerWindow        *marker_window_new_from_workspace            (GtkApplication     *app,
+                                                                  GFile              *folder,
+                                                                  GError            **error);
+gboolean             marker_window_set_workspace                 (MarkerWindow       *window,
+                                                                  GFile              *folder,
+                                                                  GError            **error);
 void                 marker_window_fullscreen                    (MarkerWindow       *window);
 void                 marker_window_unfullscreen                  (MarkerWindow       *window);
 void                 marker_window_toggle_fullscreen             (MarkerWindow       *window);
 gboolean             marker_window_is_fullscreen                 (MarkerWindow       *window);
 MarkerEditor        *marker_window_get_active_editor             (MarkerWindow       *window);
 void                 marker_window_open_file                     (MarkerWindow       *window);
+void                 marker_window_open_workspace                (MarkerWindow       *window);
 void                 marker_window_open_file_in_new_window       (MarkerWindow       *window);
 void                 marker_window_save_active_file              (MarkerWindow       *window);
 void                 marker_window_save_active_file_as           (MarkerWindow       *window);
@@ -58,6 +65,7 @@ void                 marker_window_new_editor_from_file          (MarkerWindow  
 
 void                 marker_window_search                        (MarkerWindow       *window);
 
+void                 marker_window_apply_prefs                   (MarkerWindow       *window);
 void 				 marker_window_refresh_all_preview			 (MarkerWindow       *window);
 
 

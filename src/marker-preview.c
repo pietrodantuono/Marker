@@ -682,28 +682,36 @@ MarkerPreview*
 marker_preview_new(void)
 {
   g_autoptr (WebKitUserContentManager) manager = NULL;
+  g_autoptr (GBytes) dark_css = NULL;
   g_autofree gchar *script_path = NULL;
   MarkerPreview *obj;
 
   register_gnuplot_scheme ();
   manager = webkit_user_content_manager_new ();
+  dark_css = g_resources_lookup_data (
+    "/com/github/fabiocolacio/marker/styles/marker-preview-dark.css",
+    G_RESOURCE_LOOKUP_FLAGS_NONE, NULL);
+  WebKitUserStyleSheet *dark_style = webkit_user_style_sheet_new (
+    g_bytes_get_data (dark_css, NULL),
+    WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_STYLE_LEVEL_USER,
+    NULL, NULL);
+  webkit_user_content_manager_add_style_sheet (manager, dark_style);
+  webkit_user_style_sheet_unref (dark_style);
   obj = g_object_new (MARKER_TYPE_PREVIEW,
                       "user-content-manager", manager,
                       NULL);
+
+  /* ponytail: software compositing avoids WebKitGTK/GTK 3 popover artifacts;
+   * revisit GPU compositing when its clipping works with overlapping menus. */
+  webkit_settings_set_hardware_acceleration_policy (
+    webkit_web_view_get_settings (WEBKIT_WEB_VIEW (obj)),
+    WEBKIT_HARDWARE_ACCELERATION_POLICY_NEVER);
 
   script_path = g_build_filename (SCRIPTS_DIR,
                                   "gnuplot",
                                   "gnuplot-preview.js",
                                   NULL);
   if (g_file_get_contents (script_path, &obj->gnuplot_script, NULL, NULL)) {
-    g_autoptr (WebKitUserScript) script =
-      webkit_user_script_new_for_world (obj->gnuplot_script,
-                                        WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
-                                        WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END,
-                                        GNUPLOT_WORLD,
-                                        NULL,
-                                        NULL);
-    webkit_user_content_manager_add_script (manager, script);
     obj->gnuplot_available =
       webkit_user_content_manager_register_script_message_handler_with_reply (
         manager, GNUPLOT_DATA_HANDLER, GNUPLOT_WORLD) &&
@@ -779,12 +787,81 @@ marker_preview_zoom_in (MarkerPreview *preview)
 }
 
 static void
+add_preview_style (WebKitUserContentManager *manager, const gchar *css)
+{
+  g_autoptr (WebKitUserStyleSheet) style = webkit_user_style_sheet_new (
+    css, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_STYLE_LEVEL_USER, NULL, NULL);
+  webkit_user_content_manager_add_style_sheet (manager, style);
+}
+
+static void
+apply_preview_fonts (WebKitUserContentManager *manager)
+{
+  const gchar *roles[] = {"header", "math", "code", "text"};
+  const gchar *selectors[] = {
+    "h1, h2, h3, h4, h5, h6",
+    ".katex, .MathJax, .MathJax_Display, .MathJax_SVG, math",
+    "pre, code, pre code, pre code *",
+    "body, p, blockquote, li, td, th"
+  };
+  g_autoptr (GString) css = g_string_new ("@media screen {\n");
+  for (guint i = 0; i < G_N_ELEMENTS (roles); i++) {
+    g_autofree gchar *chosen = marker_prefs_get_preview_font (roles[i]);
+    if (chosen == NULL || *chosen == '\0')
+      continue;
+    g_autoptr (PangoFontDescription) font = pango_font_description_from_string (chosen);
+    const gchar *family = pango_font_description_get_family (font);
+    if (family == NULL)
+      continue;
+    g_autoptr (GString) quoted = g_string_new (NULL);
+    for (const gchar *p = family; *p; p++) {
+      if (*p == '"' || *p == '\\')
+        g_string_append_c (quoted, '\\');
+      g_string_append_c (quoted, *p == '\n' || *p == '\r' ? ' ' : *p);
+    }
+    gdouble size = (gdouble) pango_font_description_get_size (font) / PANGO_SCALE;
+    const gchar *unit = pango_font_description_get_size_is_absolute (font) ? "px" : "pt";
+    PangoStyle slant = pango_font_description_get_style (font);
+    g_string_append_printf (css,
+      "%s {font-family: \"%s\" !important; font-weight: %d !important; font-style: %s !important;",
+      selectors[i], quoted->str, pango_font_description_get_weight (font),
+      slant == PANGO_STYLE_ITALIC ? "italic" : slant == PANGO_STYLE_OBLIQUE ? "oblique" : "normal");
+    if (size > 0)
+    {
+      gchar size_css[G_ASCII_DTOSTR_BUF_SIZE];
+      g_ascii_dtostr (size_css, sizeof size_css, size);
+      g_string_append_printf (css, "font-size: %s%s !important;", size_css, unit);
+    }
+    g_string_append (css, "}\n");
+    if (g_str_equal (roles[i], "math"))
+      g_string_append_printf (css,
+        ".katex *, .MathJax * {font-family: \"%s\" !important;}\n", quoted->str);
+  }
+  g_string_append (css, "}\n");
+  add_preview_style (manager, css->str);
+}
+
+static void
 marker_preview_load_html (MarkerPreview *preview,
                           const gchar   *html,
                           const gchar   *document_path,
                           gboolean       manual_gnuplot)
 {
   g_autofree gchar *uri = NULL;
+  WebKitUserContentManager *manager = webkit_web_view_get_user_content_manager (WEBKIT_WEB_VIEW (preview));
+  gboolean gnuplot_enabled = marker_prefs_get_use_gnuplot () && preview->gnuplot_available;
+  webkit_user_content_manager_remove_all_scripts (manager);
+  if (gnuplot_enabled && !manual_gnuplot) {
+    g_autoptr (WebKitUserScript) script = webkit_user_script_new_for_world (
+      preview->gnuplot_script, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
+      WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END, GNUPLOT_WORLD, NULL, NULL);
+    webkit_user_content_manager_add_script (manager, script);
+  }
+  webkit_user_content_manager_remove_all_style_sheets (manager);
+  g_autoptr (GBytes) dark_css = g_resources_lookup_data (
+    "/com/github/fabiocolacio/marker/styles/marker-preview-dark.css", G_RESOURCE_LOOKUP_FLAGS_NONE, NULL);
+  add_preview_style (manager, g_bytes_get_data (dark_css, NULL));
+  apply_preview_fonts (manager);
 
   if (preview->data_change_source != 0) {
     g_source_remove (preview->data_change_source);
@@ -796,8 +873,8 @@ marker_preview_load_html (MarkerPreview *preview,
   preview->document_dir = document_path != NULL
     ? g_path_get_dirname (document_path)
     : NULL;
-  preview->gnuplot_pending = preview->gnuplot_available;
-  preview->manual_gnuplot = manual_gnuplot && preview->gnuplot_available;
+  preview->gnuplot_pending = gnuplot_enabled;
+  preview->manual_gnuplot = manual_gnuplot && gnuplot_enabled;
 
   webkit_settings_set_enable_javascript (
     webkit_web_view_get_settings (WEBKIT_WEB_VIEW (preview)),

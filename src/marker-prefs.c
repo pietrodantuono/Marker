@@ -35,10 +35,38 @@
 #include "marker-prefs.h"
 
 MarkerPrefs prefs;
+static GSettings *desktop_settings;
+static GDBusProxy *appearance_portal;
+static guint system_color_scheme;
+
+static void update_editors (void);
+static void refresh_preview (void);
+
+static gboolean
+system_uses_dark_theme (void)
+{
+  if (system_color_scheme == 1 || system_color_scheme == 2)
+    return system_color_scheme == 1;
+
+  g_autoptr (GSettingsSchema) schema = g_settings_schema_source_lookup (
+    g_settings_schema_source_get_default (), "org.gnome.desktop.interface", TRUE);
+  if (g_settings_schema_has_key (schema, "color-scheme")) {
+    g_autofree gchar *choice = g_settings_get_string (desktop_settings, "color-scheme");
+    if (g_str_equal (choice, "prefer-dark") || g_str_equal (choice, "prefer-light"))
+      return g_str_equal (choice, "prefer-dark");
+  }
+
+  g_autofree gchar *theme = NULL;
+  g_object_get (gtk_settings_get_default (), "gtk-theme-name", &theme, NULL);
+  g_autofree gchar *lower = g_ascii_strdown (theme ? theme : "", -1);
+  return strstr (lower, "dark") != NULL;
+}
 
 gboolean
 marker_prefs_get_use_dark_theme()
 {
+  if (marker_prefs_get_follow_system_theme ())
+    return system_uses_dark_theme ();
   return g_settings_get_boolean(prefs.window_settings, "enable-dark-mode");
 }
 
@@ -46,6 +74,34 @@ void
 marker_prefs_set_use_dark_theme(gboolean state)
 {
   g_settings_set_boolean(prefs.window_settings, "enable-dark-mode", state);
+}
+
+gboolean
+marker_prefs_get_follow_system_theme (void)
+{
+  return g_settings_get_boolean (prefs.window_settings, "follow-system-theme");
+}
+
+void
+marker_prefs_set_follow_system_theme (gboolean state)
+{
+  g_settings_set_boolean (prefs.window_settings, "follow-system-theme", state);
+}
+
+gchar *
+marker_prefs_get_editor_font (void)
+{
+  gchar *font = g_settings_get_string (prefs.editor_settings, "font");
+  if (*font != '\0')
+    return font;
+  g_free (font);
+  return g_settings_get_string (desktop_settings, "monospace-font-name");
+}
+
+void
+marker_prefs_set_editor_font (const gchar *font)
+{
+  g_settings_set_string (prefs.editor_settings, "font", font);
 }
 
 guint
@@ -89,7 +145,16 @@ marker_prefs_set_window_position(gint pos_x,
 guint
 marker_prefs_get_editor_pane_width()
 {
-  return g_settings_get_uint(prefs.window_settings, "editor-pane-width");
+  guint width = g_settings_get_uint (prefs.window_settings, "editor-pane-width");
+
+  if (width == 0)
+  {
+    g_autoptr (GVariant) default_width =
+      g_settings_get_default_value (prefs.window_settings, "editor-pane-width");
+    width = g_variant_get_uint32 (default_width);
+  }
+
+  return width;
 }
 
 void
@@ -193,6 +258,27 @@ void
 marker_prefs_set_use_mermaid(gboolean state)
 {
   g_settings_set_boolean(prefs.preview_settings, "mermaid-toggle", state);
+}
+
+gboolean
+marker_prefs_get_use_gnuplot (void)
+{
+  return g_settings_get_boolean (prefs.preview_settings, "gnuplot-toggle");
+}
+
+void
+marker_prefs_set_use_gnuplot (gboolean state)
+{
+  g_settings_set_boolean (prefs.preview_settings, "gnuplot-toggle", state);
+}
+
+gchar *
+marker_prefs_get_preview_font (const gchar *role)
+{
+  g_autofree gchar *enabled_key = g_strdup_printf ("override-%s-font", role);
+  g_autofree gchar *font_key = g_strdup_printf ("%s-font", role);
+  return g_settings_get_boolean (prefs.preview_settings, enabled_key)
+    ? g_settings_get_string (prefs.preview_settings, font_key) : NULL;
 }
 
 gboolean
@@ -479,8 +565,7 @@ update_editors ()
     if (MARKER_IS_WINDOW(item->data))
     {
       MarkerWindow *window = item->data;
-      MarkerEditor *editor = marker_window_get_active_editor (window);
-      marker_editor_apply_prefs (editor);
+      marker_window_apply_prefs (window);
     }
   }
 }
@@ -498,6 +583,115 @@ refresh_preview ()
       marker_window_refresh_all_preview(window);
     }
   }
+}
+
+static void
+apply_theme (void)
+{
+  g_object_set (gtk_settings_get_default (), "gtk-application-prefer-dark-theme",
+                marker_prefs_get_use_dark_theme (), NULL);
+  update_editors ();
+  refresh_preview ();
+}
+
+static void
+system_theme_changed (GObject *object, gpointer detail, gpointer data)
+{
+  if (marker_prefs_get_follow_system_theme ())
+    apply_theme ();
+}
+
+static void
+theme_setting_changed (GSettings *settings, const gchar *key, gpointer data)
+{
+  if (g_str_equal (key, "enable-dark-mode") || g_str_equal (key, "follow-system-theme"))
+    apply_theme ();
+}
+
+static void
+portal_color_scheme_changed (GVariant *setting)
+{
+  g_autoptr (GVariant) value = g_variant_ref (setting);
+  while (g_variant_is_of_type (value, G_VARIANT_TYPE_VARIANT)) {
+    GVariant *inner = g_variant_get_variant (value);
+    g_variant_unref (value);
+    value = inner;
+  }
+  system_color_scheme = g_variant_is_of_type (value, G_VARIANT_TYPE_UINT32)
+    ? g_variant_get_uint32 (value) : 0;
+  system_theme_changed (NULL, NULL, NULL);
+}
+
+static void
+portal_setting_changed (GDBusProxy *proxy, const gchar *sender,
+                        const gchar *signal, GVariant *parameters, gpointer data)
+{
+  if (g_str_equal (signal, "SettingChanged")) {
+    const gchar *name, *key;
+    g_autoptr (GVariant) value = NULL;
+    g_variant_get (parameters, "(&s&sv)", &name, &key, &value);
+    if (g_str_equal (name, "org.freedesktop.appearance") && g_str_equal (key, "color-scheme"))
+      portal_color_scheme_changed (value);
+  }
+}
+
+static void
+portal_theme_read (GObject *object, GAsyncResult *result, gpointer data)
+{
+  g_autoptr (GVariant) reply = g_dbus_proxy_call_finish (G_DBUS_PROXY (object), result, NULL);
+  if (reply != NULL) {
+    g_autoptr (GVariant) value = g_variant_get_child_value (reply, 0);
+    portal_color_scheme_changed (value);
+  }
+}
+
+static void
+read_portal_theme (GDBusProxy *portal, GParamSpec *property, gpointer data)
+{
+  system_color_scheme = 0;
+  g_autofree gchar *owner = g_dbus_proxy_get_name_owner (portal);
+  if (owner != NULL)
+    g_dbus_proxy_call (portal, "Read", g_variant_new ("(ss)", "org.freedesktop.appearance", "color-scheme"),
+                       G_DBUS_CALL_FLAGS_NONE, 2000, NULL, portal_theme_read, NULL);
+  else
+    system_theme_changed (NULL, NULL, NULL);
+}
+
+static void
+portal_ready (GObject *object, GAsyncResult *result, gpointer data)
+{
+  appearance_portal = g_dbus_proxy_new_for_bus_finish (result, NULL);
+  if (appearance_portal != NULL) {
+    g_signal_connect (appearance_portal, "g-signal", G_CALLBACK (portal_setting_changed), NULL);
+    g_signal_connect (appearance_portal, "notify::g-name-owner", G_CALLBACK (read_portal_theme), NULL);
+    read_portal_theme (appearance_portal, NULL, NULL);
+  }
+}
+
+static void
+preview_setting_changed (GSettings *settings, const gchar *key, gpointer data)
+{
+  if (g_str_equal (key, "gnuplot-toggle") || g_str_has_suffix (key, "-font"))
+    refresh_preview ();
+}
+
+static void
+editor_font_changed (GSettings *settings, const gchar *key, gpointer data)
+{
+  update_editors ();
+}
+
+static gboolean
+monospace_font_filter (const PangoFontFamily *family, const PangoFontFace *face, gpointer data)
+{
+  return pango_font_family_is_monospace ((PangoFontFamily *) family);
+}
+
+static void
+editor_font_chosen (GtkFontButton *button, gpointer data)
+{
+  g_autofree gchar *font = gtk_font_chooser_get_font (GTK_FONT_CHOOSER (button));
+  marker_prefs_set_editor_font (font);
 }
 
 static void
@@ -602,7 +796,6 @@ enable_dark_mode_toggled(GtkToggleButton* button,
 {
   gboolean state = gtk_toggle_button_get_active(button);
   marker_prefs_set_use_dark_theme(state);
-  g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", state, NULL);
 }
 
 static void
@@ -757,6 +950,32 @@ marker_prefs_show_window()
   GtkToggleButton* check_button;
   GtkSpinButton* spin_button;
 
+  GtkFontChooser *editor_font = GTK_FONT_CHOOSER (gtk_builder_get_object (builder, "editor_font_button"));
+  gtk_font_chooser_set_filter_func (editor_font, monospace_font_filter, NULL, NULL);
+  g_autofree gchar *font = marker_prefs_get_editor_font ();
+  gtk_font_chooser_set_font (editor_font, font);
+  g_signal_connect (editor_font, "font-set", G_CALLBACK (editor_font_chosen), NULL);
+
+  const gchar *roles[] = {"header", "math", "code", "text"};
+  for (guint i = 0; i < G_N_ELEMENTS (roles); i++) {
+    g_autofree gchar *font_key = g_strdup_printf ("%s-font", roles[i]);
+    g_autofree gchar *enabled_key = g_strdup_printf ("override-%s-font", roles[i]);
+    g_autofree gchar *button_id = g_strdup_printf ("%s_font_button", roles[i]);
+    g_autofree gchar *toggle_id = g_strdup_printf ("%s_font_check_button", roles[i]);
+    GObject *button = gtk_builder_get_object (builder, button_id);
+    g_settings_bind (prefs.preview_settings, font_key, button, "font", G_SETTINGS_BIND_DEFAULT);
+    g_settings_bind (prefs.preview_settings, enabled_key, button, "sensitive", G_SETTINGS_BIND_GET);
+    g_settings_bind (prefs.preview_settings, enabled_key,
+                     gtk_builder_get_object (builder, toggle_id), "active", G_SETTINGS_BIND_DEFAULT);
+  }
+  g_settings_bind (prefs.preview_settings, "gnuplot-toggle",
+                   gtk_builder_get_object (builder, "gnuplot_check_button"), "active", G_SETTINGS_BIND_DEFAULT);
+  g_settings_bind (prefs.window_settings, "follow-system-theme",
+                   gtk_builder_get_object (builder, "follow_system_theme_check_button"), "active", G_SETTINGS_BIND_DEFAULT);
+  g_settings_bind (prefs.window_settings, "follow-system-theme",
+                   gtk_builder_get_object (builder, "enable_dark_mode_check_button"), "sensitive",
+                   G_SETTINGS_BIND_GET | G_SETTINGS_BIND_INVERT_BOOLEAN);
+
   combo_box = GTK_COMBO_BOX(gtk_builder_get_object(builder, "syntax_chooser"));
   list = marker_prefs_get_available_syntax_themes();
   marker_widget_populate_combo_box_with_strings(combo_box, list);
@@ -880,7 +1099,7 @@ marker_prefs_show_window()
 
   check_button =
     GTK_TOGGLE_BUTTON(gtk_builder_get_object(builder, "enable_dark_mode_check_button"));
-  gtk_toggle_button_set_active(check_button, marker_prefs_get_use_dark_theme());
+  gtk_toggle_button_set_active(check_button, g_settings_get_boolean (prefs.window_settings, "enable-dark-mode"));
 
   spin_button =
     GTK_SPIN_BUTTON(gtk_builder_get_object(builder, "right_margin_position_spin_button"));
@@ -896,6 +1115,8 @@ marker_prefs_show_window()
   gtk_spin_button_set_value(spin_button, marker_prefs_get_tab_width());
 
   GtkWindow* window = GTK_WINDOW(gtk_builder_get_object(builder, "prefs_win"));
+
+  gtk_window_set_transient_for (window, gtk_application_get_active_window (marker_get_app ()));
 	gtk_widget_show_all(GTK_WIDGET(window));
   gtk_window_present(window);
 
@@ -980,11 +1201,25 @@ marker_prefs_show_window()
 void
 marker_prefs_load()
 {
+  if (prefs.editor_settings != NULL)
+    return;
   prefs.editor_settings =
     g_settings_new("com.github.fabiocolacio.marker.preferences.editor");
   prefs.preview_settings =
     g_settings_new("com.github.fabiocolacio.marker.preferences.preview");
   prefs.window_settings =
     g_settings_new("com.github.fabiocolacio.marker.preferences.window");
+  desktop_settings = g_settings_new ("org.gnome.desktop.interface");
+  g_signal_connect (prefs.editor_settings, "changed::font", G_CALLBACK (editor_font_changed), NULL);
+  g_signal_connect (prefs.preview_settings, "changed", G_CALLBACK (preview_setting_changed), NULL);
+  g_signal_connect (prefs.window_settings, "changed", G_CALLBACK (theme_setting_changed), NULL);
+  g_signal_connect (desktop_settings, "changed::color-scheme", G_CALLBACK (system_theme_changed), NULL);
+  g_signal_connect (desktop_settings, "changed::gtk-theme", G_CALLBACK (system_theme_changed), NULL);
+  g_signal_connect (gtk_settings_get_default (), "notify::gtk-theme-name", G_CALLBACK (system_theme_changed), NULL);
+  g_dbus_proxy_new_for_bus (G_BUS_TYPE_SESSION,
+                            G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES | G_DBUS_PROXY_FLAGS_DO_NOT_AUTO_START,
+                            NULL, "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+                            "org.freedesktop.portal.Settings", NULL, portal_ready, NULL);
+  apply_theme ();
 }
 

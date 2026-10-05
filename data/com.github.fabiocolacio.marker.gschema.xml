@@ -19,6 +19,12 @@
   </schema>
 
   <schema path="/com/github/fabiocolacio/marker/preferences/editor/" id="com.github.fabiocolacio.marker.preferences.editor">
+    <key name="font" type="s">
+      <default>''</default>
+      <summary>Editor font</summary>
+      <description>A monospaced editor font. An empty value uses the system monospace font.</description>
+    </key>
+
     <key name="syntax-theme" type="s">
       <default>'tango'</default>
       <summary>Syntax Theme</summary>
@@ -108,7 +114,7 @@
     <key name="css-toggle" type="b">
       <default>true</default>
       <summary>Enable CSS theme in Preview</summary>
-      <summary>Use a CSS theme in the live preview</summary>
+      <description>Use a CSS theme in the live preview</description>
     </key>
 
     <key name="mathjs-toggle" type="b">
@@ -133,6 +139,45 @@
       <default>true</default>
       <summary>Enable mermaid.js in Preview</summary>
       <description>Use mermaid.js to show diagram in the live preview.</description>
+    </key>
+
+    <key name="gnuplot-toggle" type="b">
+      <default>true</default>
+      <summary>Enable gnuplot in Preview</summary>
+      <description>Render gnuplot code blocks as plots in the preview and exports.</description>
+    </key>
+
+    <key name="override-header-font" type="b">
+      <default>false</default>
+      <summary>Override the preview heading font</summary>
+    </key>
+    <key name="header-font" type="s">
+      <default>'Sans Bold 18'</default>
+      <summary>Preview heading font</summary>
+    </key>
+    <key name="override-math-font" type="b">
+      <default>false</default>
+      <summary>Override the preview math font</summary>
+    </key>
+    <key name="math-font" type="s">
+      <default>'Serif 12'</default>
+      <summary>Preview math font</summary>
+    </key>
+    <key name="override-code-font" type="b">
+      <default>false</default>
+      <summary>Override the preview code font</summary>
+    </key>
+    <key name="code-font" type="s">
+      <default>'Monospace 11'</default>
+      <summary>Preview code font</summary>
+    </key>
+    <key name="override-text-font" type="b">
+      <default>false</default>
+      <summary>Override the preview text font</summary>
+    </key>
+    <key name="text-font" type="s">
+      <default>'Sans 12'</default>
+      <summary>Preview text font</summary>
     </key>
 
     <key name="highlight-theme" type="s">
@@ -163,6 +208,12 @@
       <default>false</default>
       <summary>Enter dark-mode</summary>
       <description>When this is enabled, the dark variant of the current gtk theme will be used.</description>
+    </key>
+
+    <key name="follow-system-theme" type="b">
+      <default>false</default>
+      <summary>Follow the system theme</summary>
+      <description>Follow the desktop light or dark appearance instead of the manual dark-mode setting.</description>
     </key>
 
     <key name="window-width" type="u">

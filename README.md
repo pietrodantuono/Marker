@@ -7,6 +7,7 @@ Marker is a markdown editor for linux made with GTK+-3.0
 ## Features
 
 * View and edit markdown documents
+* Open a folder as a workspace and browse its Markdown files, images, and data files
 * HTML and LaTeX conversion of markdown documents with [scidown](https://github.com/Mandarancio/scidown/)
   * Support for YAML headers
   * Document classes

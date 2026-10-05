@@ -10,15 +10,28 @@
     <property name="icon_name">view-restore-symbolic</property>
     <property name="icon_size">2</property>
   </object>
+
+  <menu id="open_menu">
+    <item>
+      <attribute name="label" translatable="yes">Open File…</attribute>
+      <attribute name="action">win.open</attribute>
+    </item>
+    <item>
+      <attribute name="label" translatable="yes">Open Folder…</attribute>
+      <attribute name="action">win.openworkspace</attribute>
+    </item>
+  </menu>
   
   <!-- Header Bar -->
   <object class="GtkHeaderBar" id="header_bar">
     <property name="visible">True</property>
     <child>
-      <object class="GtkButton" id="open_btn">
+      <object class="GtkMenuButton" id="open_btn">
         <property name="visible">True</property>
+        <property name="can_focus">True</property>
         <property name="label" translatable="yes">Open…</property>
-        <property name="action-name">win.open</property>
+        <property name="menu-model">open_menu</property>
+        <property name="use-popover">True</property>
       </object>
       <packing>
         <property name="pack_type">start</property>

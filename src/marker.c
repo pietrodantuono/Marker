@@ -79,10 +79,6 @@ marker_init(GtkApplication* app)
   const gchar *quit_accels[] = { "<Ctrl>q", NULL };
   gtk_application_set_accels_for_action (app, "app.quit", quit_accels);
 
-  g_object_set(gtk_settings_get_default(),
-               "gtk-application-prefer-dark-theme",
-               marker_prefs_get_use_dark_theme(),
-               NULL);
 }
 
 static void
@@ -113,8 +109,17 @@ marker_open(GtkApplication* app,
   for (int i = 0; i < num_files; ++i)
   {
     GFile* file = files[i];
-    g_object_ref(file);
-    marker_open_file(file);
+    if (g_file_query_file_type (file,
+                                G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                NULL) == G_FILE_TYPE_DIRECTORY)
+    {
+      marker_create_new_window_from_workspace (file);
+    }
+    else
+    {
+      g_object_ref(file);
+      marker_open_file(file);
+    }
   }
   g_application_release (G_APPLICATION (app));
 }
@@ -235,32 +240,55 @@ marker_create_new_window()
   gtk_widget_show (GTK_WIDGET (window));
 }
 
+static void
+marker_apply_cli_view_mode (MarkerWindow *window)
+{
+  MarkerEditor *editor = marker_window_get_active_editor (window);
+
+  if (preview_mode_arg)
+    marker_editor_set_view_mode (editor, PREVIEW_ONLY_MODE);
+  else if (editor_mode_arg)
+    marker_editor_set_view_mode (editor, EDITOR_ONLY_MODE);
+  else if (dual_pane_mode_arg)
+    marker_editor_set_view_mode (editor, DUAL_PANE_MODE);
+  else if (dual_window_mode_arg)
+    marker_editor_set_view_mode (editor, DUAL_WINDOW_MODE);
+}
+
 void
 marker_create_new_window_from_file (GFile *file)
 {
   MarkerWindow *window = marker_window_new_from_file (app, file);
   gtk_widget_show (GTK_WIDGET (window));
 
-  if (preview_mode_arg)
+  marker_apply_cli_view_mode (window);
+}
+
+void
+marker_create_new_window_from_workspace (GFile *folder)
+{
+  g_autoptr (GError) error = NULL;
+  MarkerWindow *window = marker_window_new_from_workspace (app, folder, &error);
+
+  if (window == NULL)
   {
-    MarkerEditor *editor = marker_window_get_active_editor (window);
-    marker_editor_set_view_mode (editor, PREVIEW_ONLY_MODE);
+    GtkWidget *dialog = gtk_message_dialog_new (
+      gtk_application_get_active_window (app),
+      GTK_DIALOG_MODAL,
+      GTK_MESSAGE_ERROR,
+      GTK_BUTTONS_CLOSE,
+      "%s",
+      _("Unable to open workspace"));
+    gtk_message_dialog_format_secondary_text (GTK_MESSAGE_DIALOG (dialog),
+                                              "%s",
+                                              error->message);
+    gtk_dialog_run (GTK_DIALOG (dialog));
+    gtk_widget_destroy (dialog);
+    return;
   }
-  else if (editor_mode_arg)
-  {
-    MarkerEditor *editor = marker_window_get_active_editor (window);
-    marker_editor_set_view_mode (editor, EDITOR_ONLY_MODE);
-  }
-  else if (dual_pane_mode_arg)
-  {
-    MarkerEditor *editor = marker_window_get_active_editor (window);
-    marker_editor_set_view_mode (editor, DUAL_PANE_MODE);
-  }
-  else if (dual_window_mode_arg)
-  {
-    MarkerEditor *editor = marker_window_get_active_editor (window);
-    marker_editor_set_view_mode (editor, DUAL_WINDOW_MODE);
-  }
+
+  gtk_widget_show (GTK_WIDGET (window));
+  marker_apply_cli_view_mode (window);
 }
 
 

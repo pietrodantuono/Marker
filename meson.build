@@ -40,6 +40,7 @@ marker_sources = [
   'src/marker-source-view.c',
   'src/marker-preview.c',
   'src/marker-gnuplot.c',
+  'src/marker-workspace.c',
   'src/marker-string.c',
   'src/marker-widget.c',
   'src/marker-sketcher-window.c',
@@ -134,6 +135,15 @@ gnuplot_test = executable(
 )
 
 test('gnuplot data file boundary', gnuplot_test)
+
+workspace_test = executable(
+  'marker-workspace-test',
+  sources : ['test/marker-workspace-test.c', 'src/marker-workspace.c'],
+  include_directories : include_directories('src'),
+  dependencies : [glib_dep, gio_dep]
+)
+
+test('workspace listing', workspace_test)
 
 install_data(
   'data/com.github.fabiocolacio.marker.svg',

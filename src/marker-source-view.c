@@ -164,6 +164,25 @@ marker_source_view_set_syntax_theme(MarkerSourceView* source_view,
     gtk_source_style_scheme_manager_get_default();
   GtkSourceStyleScheme* scheme =
     gtk_source_style_scheme_manager_get_scheme(style_manager, theme);
+
+  if (marker_prefs_get_use_dark_theme ())
+  {
+    GtkSourceStyle *text = scheme ? gtk_source_style_scheme_get_style (scheme, "text") : NULL;
+    g_autofree gchar *background = NULL;
+    GdkRGBA color;
+
+    if (text)
+      g_object_get (text, "background", &background, NULL);
+
+    if (background == NULL || !gdk_rgba_parse (&color, background) ||
+        (color.red + color.green + color.blue) / 3 > 0.5)
+    {
+      scheme = gtk_source_style_scheme_manager_get_scheme (style_manager, "marker-dark");
+      if (scheme == NULL)
+        scheme = gtk_source_style_scheme_manager_get_scheme (style_manager, "oblivion");
+    }
+  }
+
   gtk_source_buffer_set_style_scheme(GTK_SOURCE_BUFFER(buffer), scheme);
 }
 
@@ -241,17 +260,18 @@ marker_source_view_set_language(MarkerSourceView* source_view,
   }
 }
 
-static void
-default_font_changed(GSettings*   settings,
-                     const gchar* key,
-                     gpointer     user_data)
+void
+marker_source_view_apply_font (MarkerSourceView *source_view)
 {
-  MarkerSourceView* source_view = (MarkerSourceView*) user_data;
-  gchar* fontname = g_settings_get_string(settings, key);
-  PangoFontDescription* font = pango_font_description_from_string(fontname);
-  gtk_widget_modify_font(GTK_WIDGET(source_view), font);
-  pango_font_description_free(font);
-  g_free(fontname);
+  g_autofree gchar *fontname = marker_prefs_get_editor_font ();
+  g_autoptr (PangoFontDescription) font = pango_font_description_from_string (fontname);
+  gtk_widget_override_font (GTK_WIDGET (source_view), font);
+}
+
+static void
+default_font_changed (GSettings *settings, const gchar *key, gpointer user_data)
+{
+  marker_source_view_apply_font (MARKER_SOURCE_VIEW (user_data));
 }
 
 static void
@@ -289,11 +309,7 @@ marker_source_view_init (MarkerSourceView *source_view)
   marker_source_view_set_language (source_view, "markdown");
   source_view->settings = g_settings_new ("org.gnome.desktop.interface");
   g_signal_connect (source_view->settings, "changed::monospace-font-name", G_CALLBACK (default_font_changed), source_view);
-  gchar *fontname = g_settings_get_string (source_view->settings, "monospace-font-name");
-  PangoFontDescription* font = pango_font_description_from_string (fontname);
-  gtk_widget_modify_font (GTK_WIDGET (source_view), font);
-  pango_font_description_free (font);
-  g_free (fontname);
+  marker_source_view_apply_font (source_view);
 
   gtk_source_view_set_insert_spaces_instead_of_tabs (GTK_SOURCE_VIEW (source_view), marker_prefs_get_replace_tabs ());
   gtk_source_view_set_tab_width (GTK_SOURCE_VIEW (source_view), marker_prefs_get_tab_width ());
@@ -315,7 +331,8 @@ marker_source_view_init (MarkerSourceView *source_view)
 static void
 marker_source_view_class_init(MarkerSourceViewClass* class)
 {
-
+  gtk_source_style_scheme_manager_prepend_search_path (
+    gtk_source_style_scheme_manager_get_default (), STYLES_DIR);
 }
 
 MarkerSourceView*

@@ -31,6 +31,7 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE (MarkerSourceView, marker_source_view, MARKER, SOURCE_VIEW, GtkSourceView)
 
 MarkerSourceView        *marker_source_view_new                      (void);
+void                     marker_source_view_apply_font              (MarkerSourceView   *source_view);
 gboolean                 marker_source_view_get_modified             (MarkerSourceView   *source_view);
 void                     marker_source_view_set_modified             (MarkerSourceView   *source_view,
                                                                       gboolean            modified);

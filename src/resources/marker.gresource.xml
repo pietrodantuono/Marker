@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
   <gresource prefix="/com/github/fabiocolacio/marker">
+    <file>styles/marker-preview-dark.css</file>
     <file>ui/marker-prefs-window.ui</file>
     <file>ui/marker-wysiwyg-toolbar.ui</file>
     <file>ui/marker-shortcuts-window.ui</file>

@@ -24,6 +24,7 @@
 #include "marker-editor.h"
 #include "marker-exporter.h"
 #include "marker-sketcher-window.h"
+#include "marker-workspace.h"
 
 #include "marker-window.h"
 
@@ -40,6 +41,16 @@ enum {
   NAME_COLUMN,
   EDITOR_COLUMN,
   N_COLUMNS
+};
+
+enum {
+  WORKSPACE_NAME_COLUMN,
+  WORKSPACE_ICON_COLUMN,
+  WORKSPACE_FILE_COLUMN,
+  WORKSPACE_DIRECTORY_COLUMN,
+  WORKSPACE_MARKDOWN_COLUMN,
+  WORKSPACE_LOADED_COLUMN,
+  WORKSPACE_N_COLUMNS
 };
 
 struct _MarkerWindow
@@ -59,6 +70,11 @@ struct _MarkerWindow
   GtkStack             *editors_stack;
   GtkTreeView          *documents_tree_view;
   GtkTreeStore         *documents_tree_store;
+  GtkWidget            *workspace_box;
+  GtkLabel             *workspace_label;
+  GtkTreeView          *workspace_tree_view;
+  GtkTreeStore         *workspace_tree_store;
+  GFile                *workspace_root;
   GtkPaned             *main_paned;
   GtkWidget            *paned1;
   GtkWidget            *paned2;
@@ -145,6 +161,251 @@ show_unsaved_documents_warning (MarkerWindow *window)
     return TRUE;
 
   return FALSE;
+}
+
+static void
+show_workspace_error (MarkerWindow *window,
+                      const gchar  *message,
+                      GError       *error)
+{
+  GtkWidget *dialog;
+
+  dialog = gtk_message_dialog_new (GTK_WINDOW (window),
+                                   GTK_DIALOG_MODAL,
+                                   GTK_MESSAGE_ERROR,
+                                   GTK_BUTTONS_CLOSE,
+                                   "%s",
+                                   message);
+  if (error != NULL)
+    gtk_message_dialog_format_secondary_text (GTK_MESSAGE_DIALOG (dialog),
+                                              "%s",
+                                              error->message);
+  gtk_dialog_run (GTK_DIALOG (dialog));
+  gtk_widget_destroy (dialog);
+}
+
+static void
+append_workspace_info (MarkerWindow *window,
+                       GtkTreeIter  *parent,
+                       GFile        *directory,
+                       GFileInfo    *info)
+{
+  g_autoptr (GFile) file = NULL;
+  GtkTreeIter iter;
+  gboolean is_directory;
+
+  file = g_file_get_child (directory, g_file_info_get_name (info));
+  is_directory = g_file_info_get_file_type (info) == G_FILE_TYPE_DIRECTORY;
+
+  gtk_tree_store_append (window->workspace_tree_store, &iter, parent);
+  gtk_tree_store_set (window->workspace_tree_store, &iter,
+                      WORKSPACE_NAME_COLUMN, g_file_info_get_display_name (info),
+                      WORKSPACE_ICON_COLUMN, g_file_info_get_icon (info),
+                      WORKSPACE_FILE_COLUMN, file,
+                      WORKSPACE_DIRECTORY_COLUMN, is_directory,
+                      WORKSPACE_MARKDOWN_COLUMN,
+                        marker_workspace_file_is_markdown (info),
+                      WORKSPACE_LOADED_COLUMN, !is_directory,
+                      -1);
+
+  if (is_directory)
+  {
+    GtkTreeIter placeholder;
+    gtk_tree_store_append (window->workspace_tree_store, &placeholder, &iter);
+  }
+}
+
+static void
+append_workspace_children (MarkerWindow *window,
+                           GtkTreeIter  *parent,
+                           GFile        *directory,
+                           GPtrArray    *children)
+{
+  for (guint i = 0; i < children->len; i++)
+    append_workspace_info (window,
+                           parent,
+                           directory,
+                           g_ptr_array_index (children, i));
+}
+
+static void
+append_workspace_error (MarkerWindow *window,
+                        GtkTreeIter  *parent,
+                        GError       *error)
+{
+  g_autoptr (GIcon) icon = g_themed_icon_new ("dialog-warning-symbolic");
+  g_autofree gchar *message = g_strdup_printf (_("Unable to read folder: %s"),
+                                               error->message);
+  GtkTreeIter iter;
+
+  gtk_tree_store_append (window->workspace_tree_store, &iter, parent);
+  gtk_tree_store_set (window->workspace_tree_store, &iter,
+                      WORKSPACE_NAME_COLUMN, message,
+                      WORKSPACE_ICON_COLUMN, icon,
+                      WORKSPACE_LOADED_COLUMN, TRUE,
+                      -1);
+}
+
+static gboolean
+refresh_workspace_tree (MarkerWindow *window,
+                        GError      **error)
+{
+  g_autoptr (GPtrArray) children = NULL;
+
+  g_return_val_if_fail (G_IS_FILE (window->workspace_root), FALSE);
+
+  children = marker_workspace_list_children (window->workspace_root, error);
+  if (children == NULL)
+    return FALSE;
+
+  gtk_tree_store_clear (window->workspace_tree_store);
+  append_workspace_children (window, NULL, window->workspace_root, children);
+  return TRUE;
+}
+
+gboolean
+marker_window_set_workspace (MarkerWindow *window,
+                             GFile        *folder,
+                             GError      **error)
+{
+  g_autoptr (GFileInfo) info = NULL;
+  g_autoptr (GPtrArray) children = NULL;
+  g_autofree gchar *path = NULL;
+  GAction *action;
+
+  g_return_val_if_fail (MARKER_IS_WINDOW (window), FALSE);
+  g_return_val_if_fail (G_IS_FILE (folder), FALSE);
+  g_return_val_if_fail (error == NULL || *error == NULL, FALSE);
+
+  if (!g_file_is_native (folder))
+  {
+    g_set_error_literal (error,
+                         G_IO_ERROR,
+                         G_IO_ERROR_NOT_SUPPORTED,
+                         _("Workspaces require a local folder."));
+    return FALSE;
+  }
+
+  info = g_file_query_info (folder,
+                            G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME ","
+                            G_FILE_ATTRIBUTE_STANDARD_TYPE ","
+                            G_FILE_ATTRIBUTE_STANDARD_IS_SYMLINK,
+                            G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                            NULL,
+                            error);
+  if (info == NULL)
+    return FALSE;
+
+  if (g_file_info_get_file_type (info) != G_FILE_TYPE_DIRECTORY ||
+      g_file_info_get_is_symlink (info))
+  {
+    g_set_error_literal (error,
+                         G_IO_ERROR,
+                         G_IO_ERROR_NOT_DIRECTORY,
+                         _("The selected item is not a folder."));
+    return FALSE;
+  }
+
+  children = marker_workspace_list_children (folder, error);
+  if (children == NULL)
+    return FALSE;
+
+  g_set_object (&window->workspace_root, folder);
+  gtk_tree_store_clear (window->workspace_tree_store);
+  append_workspace_children (window, NULL, folder, children);
+
+  gtk_label_set_text (window->workspace_label,
+                      g_file_info_get_display_name (info));
+  path = g_file_get_path (folder);
+  gtk_widget_set_tooltip_text (GTK_WIDGET (window->workspace_label), path);
+  gtk_widget_show (window->workspace_box);
+
+  action = g_action_map_lookup_action (G_ACTION_MAP (window), "refreshworkspace");
+  g_simple_action_set_enabled (G_SIMPLE_ACTION (action), TRUE);
+
+  action = g_action_map_lookup_action (G_ACTION_MAP (window), "sidebar");
+  g_simple_action_set_state (G_SIMPLE_ACTION (action),
+                             g_variant_new_boolean (TRUE));
+  marker_prefs_set_show_sidebar (TRUE);
+  marker_window_show_sidebar (window);
+  return TRUE;
+}
+
+static void
+workspace_row_expanded_cb (GtkTreeView *tree_view,
+                           GtkTreeIter *iter,
+                           GtkTreePath *path,
+                           gpointer     user_data)
+{
+  MarkerWindow *window = MARKER_WINDOW (user_data);
+  GtkTreeModel *model = GTK_TREE_MODEL (window->workspace_tree_store);
+  g_autoptr (GFile) directory = NULL;
+  g_autoptr (GPtrArray) children = NULL;
+  g_autoptr (GError) error = NULL;
+  gboolean is_directory;
+  gboolean loaded;
+  GtkTreeIter child;
+
+  gtk_tree_model_get (model, iter,
+                      WORKSPACE_FILE_COLUMN, &directory,
+                      WORKSPACE_DIRECTORY_COLUMN, &is_directory,
+                      WORKSPACE_LOADED_COLUMN, &loaded,
+                      -1);
+  if (!is_directory || loaded || directory == NULL)
+    return;
+
+  gtk_tree_store_set (window->workspace_tree_store, iter,
+                      WORKSPACE_LOADED_COLUMN, TRUE,
+                      -1);
+  while (gtk_tree_model_iter_children (model, &child, iter))
+    gtk_tree_store_remove (window->workspace_tree_store, &child);
+
+  children = marker_workspace_list_children (directory, &error);
+  if (children == NULL)
+  {
+    append_workspace_error (window, iter, error);
+    return;
+  }
+
+  append_workspace_children (window, iter, directory, children);
+}
+
+static void
+workspace_row_activated_cb (GtkTreeView       *tree_view,
+                            GtkTreePath       *path,
+                            GtkTreeViewColumn *column,
+                            gpointer           user_data)
+{
+  MarkerWindow *window = MARKER_WINDOW (user_data);
+  GtkTreeModel *model = GTK_TREE_MODEL (window->workspace_tree_store);
+  g_autoptr (GFile) file = NULL;
+  GtkTreeIter iter;
+  gboolean is_directory;
+  gboolean is_markdown;
+
+  if (!gtk_tree_model_get_iter (model, &iter, path))
+    return;
+
+  gtk_tree_model_get (model, &iter,
+                      WORKSPACE_FILE_COLUMN, &file,
+                      WORKSPACE_DIRECTORY_COLUMN, &is_directory,
+                      WORKSPACE_MARKDOWN_COLUMN, &is_markdown,
+                      -1);
+
+  if (!is_directory && is_markdown && file != NULL)
+    marker_window_new_editor_from_file (window, g_steal_pointer (&file));
+}
+
+static void
+action_refresh_workspace (GSimpleAction *action,
+                          GVariant      *parameter,
+                          gpointer       user_data)
+{
+  MarkerWindow *window = MARKER_WINDOW (user_data);
+  g_autoptr (GError) error = NULL;
+
+  if (!refresh_workspace_tree (window, &error))
+    show_workspace_error (window, _("Unable to refresh workspace"), error);
 }
 
 static void
@@ -581,6 +842,37 @@ button_pressed_cb (GtkWidget *view,
 }
 
 static void
+add_sidebar_style (GtkWidget *widget, gpointer data)
+{
+  gtk_style_context_add_provider (gtk_widget_get_style_context (widget),
+                                  GTK_STYLE_PROVIDER (data), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  if (GTK_IS_CONTAINER (widget))
+    gtk_container_forall (GTK_CONTAINER (widget), add_sidebar_style, data);
+}
+
+static void
+update_sidebar_style (GtkWidget *header, GtkCssProvider *provider)
+{
+  GtkStyleContext *context = gtk_widget_get_style_context (header);
+  g_autoptr (GdkRGBA) normal = NULL;
+  g_autoptr (GdkRGBA) backdrop = NULL;
+  gtk_style_context_get (context, GTK_STATE_FLAG_NORMAL, "background-color", &normal, NULL);
+  gtk_style_context_get (context, GTK_STATE_FLAG_BACKDROP, "background-color", &backdrop, NULL);
+  g_autofree gchar *normal_css = gdk_rgba_to_string (normal);
+  g_autofree gchar *backdrop_css = gdk_rgba_to_string (backdrop);
+  g_autofree gchar *css = g_strdup_printf (
+    ".marker-sidebar {background-color: %s; background-image: none; border: none; box-shadow: none;}"
+    ".marker-sidebar:backdrop {background-color: %s;}"
+    ".marker-sidebar scrolledwindow, .marker-sidebar viewport,"
+    ".marker-sidebar treeview.view:not(:selected):not(:hover), .marker-sidebar treeview header button {"
+    "background-color: transparent; background-image: none; border: none; box-shadow: none;}"
+    ".marker-sidebar > separator, #marker-main-paned > separator {"
+    "background: transparent; border: none; box-shadow: none; min-width: 1px; min-height: 1px;}",
+    normal_css, backdrop_css);
+  gtk_css_provider_load_from_data (provider, css, -1, NULL);
+}
+
+static void
 marker_window_init (MarkerWindow *window)
 {
   { // SETUP ACTIONS //
@@ -701,6 +993,17 @@ marker_window_init (MarkerWindow *window)
     gtk_application_set_accels_for_action (app, "win.open", open_accels);
     g_action_map_add_action (G_ACTION_MAP (window), action);
 
+    action = G_ACTION (g_simple_action_new ("openworkspace", NULL));
+    g_signal_connect_swapped (G_SIMPLE_ACTION (action), "activate", G_CALLBACK (marker_window_open_workspace), window);
+    const gchar *openworkspace_accels[] = { "<Ctrl><Shift>o", NULL };
+    gtk_application_set_accels_for_action (app, "win.openworkspace", openworkspace_accels);
+    g_action_map_add_action (G_ACTION_MAP (window), action);
+
+    action = G_ACTION (g_simple_action_new ("refreshworkspace", NULL));
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action), FALSE);
+    g_signal_connect (G_SIMPLE_ACTION (action), "activate", G_CALLBACK (action_refresh_workspace), window);
+    g_action_map_add_action (G_ACTION_MAP (window), action);
+
     action = G_ACTION (g_simple_action_new ("reload", NULL));
     g_signal_connect (G_SIMPLE_ACTION (action), "activate", G_CALLBACK (action_reload), window);
     const gchar *reload_accels[] = { "F5", "<Ctrl>r", NULL };
@@ -817,6 +1120,39 @@ marker_window_init (MarkerWindow *window)
                     G_CALLBACK(button_pressed_cb),
                     renderer);
 
+  /** WORKSPACE TREE **/
+  window->workspace_box = GTK_WIDGET (gtk_builder_get_object (builder, "workspace_box"));
+  window->workspace_label = GTK_LABEL (gtk_builder_get_object (builder, "workspace_label"));
+  window->workspace_tree_view = GTK_TREE_VIEW (gtk_builder_get_object (builder, "workspace_tree_view"));
+  window->workspace_tree_store = gtk_tree_store_new (WORKSPACE_N_COLUMNS,
+                                                       G_TYPE_STRING,
+                                                       G_TYPE_ICON,
+                                                       G_TYPE_FILE,
+                                                       G_TYPE_BOOLEAN,
+                                                       G_TYPE_BOOLEAN,
+                                                       G_TYPE_BOOLEAN);
+  gtk_tree_view_set_model (window->workspace_tree_view,
+                           GTK_TREE_MODEL (window->workspace_tree_store));
+
+  column = gtk_tree_view_column_new ();
+  renderer = gtk_cell_renderer_pixbuf_new ();
+  gtk_tree_view_column_pack_start (column, renderer, FALSE);
+  gtk_tree_view_column_set_attributes (column, renderer,
+                                       "gicon", WORKSPACE_ICON_COLUMN,
+                                       NULL);
+  renderer = gtk_cell_renderer_text_new ();
+  g_object_set (renderer, "ellipsize", PANGO_ELLIPSIZE_END, NULL);
+  gtk_tree_view_column_pack_start (column, renderer, TRUE);
+  gtk_tree_view_column_set_attributes (column, renderer,
+                                       "text", WORKSPACE_NAME_COLUMN,
+                                       NULL);
+  gtk_tree_view_append_column (window->workspace_tree_view, column);
+
+  g_signal_connect (window->workspace_tree_view, "row-expanded",
+                    G_CALLBACK (workspace_row_expanded_cb), window);
+  g_signal_connect (window->workspace_tree_view, "row-activated",
+                    G_CALLBACK (workspace_row_activated_cb), window);
+
   /** EDITOR STACKS **/
   window->editors_stack = GTK_STACK(gtk_builder_get_object(builder, "documents_stack"));
   gtk_widget_show(GTK_WIDGET(window->editors_stack));
@@ -845,6 +1181,12 @@ marker_window_init (MarkerWindow *window)
   gtk_header_bar_set_show_close_button (header_bar, TRUE);
   gtk_box_pack_start (header_box, GTK_WIDGET (header_bar), FALSE, TRUE, 0);
   gtk_widget_show (GTK_WIDGET (header_box));
+  g_autoptr (GtkCssProvider) sidebar_style = gtk_css_provider_new ();
+  add_sidebar_style (window->paned1, sidebar_style);
+  gtk_style_context_add_provider (gtk_widget_get_style_context (main_paned),
+                                  GTK_STYLE_PROVIDER (sidebar_style), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_signal_connect_object (header_bar, "style-updated", G_CALLBACK (update_sidebar_style), sidebar_style, 0);
+  update_sidebar_style (GTK_WIDGET (header_bar), sidebar_style);
 
   /** Popover **/
   GtkMenuButton *menu_btn = GTK_MENU_BUTTON(gtk_builder_get_object(builder, "menu_btn"));
@@ -911,9 +1253,21 @@ marker_window_constructed (GObject *object)
 }
 
 static void
+marker_window_dispose (GObject *object)
+{
+  MarkerWindow *window = MARKER_WINDOW (object);
+
+  g_clear_object (&window->workspace_root);
+  G_OBJECT_CLASS (marker_window_parent_class)->dispose (object);
+}
+
+static void
 marker_window_class_init (MarkerWindowClass *class)
 {
-  G_OBJECT_CLASS (class)->constructed = marker_window_constructed;
+  GObjectClass *object_class = G_OBJECT_CLASS (class);
+
+  object_class->constructed = marker_window_constructed;
+  object_class->dispose = marker_window_dispose;
 }
 
 
@@ -1061,6 +1415,10 @@ marker_window_new_editor_from_file (MarkerWindow *window,
     editor = marker_editor_new_from_file(file);
     marker_window_add_editor(window, editor);
   }
+  else
+  {
+    g_object_unref (file);
+  }
 }
 
 MarkerWindow *
@@ -1080,6 +1438,22 @@ marker_window_new_from_file (GtkApplication *app,
   return window;
 }
 
+MarkerWindow *
+marker_window_new_from_workspace (GtkApplication *app,
+                                  GFile          *folder,
+                                  GError        **error)
+{
+  MarkerWindow *window = marker_window_new (app);
+
+  if (!marker_window_set_workspace (window, folder, error))
+  {
+    gtk_widget_destroy (GTK_WIDGET (window));
+    return NULL;
+  }
+
+  return window;
+}
+
 void
 marker_window_open_file (MarkerWindow *window)
 {
@@ -1095,6 +1469,37 @@ marker_window_open_file (MarkerWindow *window)
   {
     GFile *file = gtk_file_chooser_get_file (GTK_FILE_CHOOSER (dialog));
     marker_window_new_editor_from_file(window, file);
+  }
+}
+
+void
+marker_window_open_workspace (MarkerWindow *window)
+{
+  g_assert (MARKER_IS_WINDOW (window));
+
+  g_autoptr (GtkFileChooserNative) dialog =
+    gtk_file_chooser_native_new (_("Open Folder"),
+                                 GTK_WINDOW (window),
+                                 GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
+                                 _("_Open"), _("_Cancel"));
+  gtk_file_chooser_set_local_only (GTK_FILE_CHOOSER (dialog), TRUE);
+
+  if (gtk_native_dialog_run (GTK_NATIVE_DIALOG (dialog)) == GTK_RESPONSE_ACCEPT)
+  {
+    g_autoptr (GFile) folder =
+      gtk_file_chooser_get_file (GTK_FILE_CHOOSER (dialog));
+
+    if (window->workspace_root != NULL)
+    {
+      marker_create_new_window_from_workspace (folder);
+    }
+    else
+    {
+      g_autoptr (GError) error = NULL;
+
+      if (!marker_window_set_workspace (window, folder, &error))
+        show_workspace_error (window, _("Unable to open workspace"), error);
+    }
   }
 }
 
@@ -1283,7 +1688,7 @@ marker_window_close_current_document (MarkerWindow *window)
       gtk_widget_destroy (GTK_WIDGET (editor));
       window->editors_counter--;
 
-      if (window->editors_counter == 1)
+      if (window->editors_counter == 1 && window->workspace_root == NULL)
       {
         marker_window_hide_sidebar (window);
       }
@@ -1351,6 +1756,17 @@ marker_window_search (MarkerWindow       *window)
   {
     marker_editor_toggle_search_bar(window->active_editor);
   }
+}
+
+void
+marker_window_apply_prefs (MarkerWindow *window)
+{
+  GList *editors = gtk_container_get_children (GTK_CONTAINER (window->editors_stack));
+
+  for (GList *item = editors; item != NULL; item = item->next)
+    marker_editor_apply_prefs (MARKER_EDITOR (item->data));
+
+  g_list_free (editors);
 }
 
 void 
