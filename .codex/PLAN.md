@@ -1,5 +1,37 @@
 # Implementation plan
 
+## Rendered font scale correction (2026-10-06)
+
+Inspect actual font/override/theme and saved zoom before changing shared typography.
+The user's preview zoom is 2.1; source/prose is Monospace 11 and font/theme overrides
+are disabled. Reset only preview zoom to its existing 1.0 default. Preserve the
+640px writing measure, heading hierarchy, fonts and notebook CSS. Verify readback,
+existing native typography workflow and task diff; no production change/rebuild is
+needed for a persisted preference correction. Record how to reset zoom in a live pane.
+
+Exit met: saved zoom reads 1.0; prose remains Monospace 11 and width 640. Existing
+native /window/default-typography passes (2.17s) on isolated Xvfb; installed binary
+matches build-user. README documents focused-preview Ctrl+0 reset. No production
+code, schema or font defaults changed; task-owned display stopped after validation.
+
+## Find and Replace shortcut (2026-10-06)
+
+- Reuse the editor's GtkSearchBar and GtkSourceSearchContext; add an optional
+  replacement row with Replace and Replace All, rather than a separate dialog.
+- Register win.replace on Ctrl+H and expose Find and Replace in document overflow.
+  Ctrl+H always opens/focuses the controls; Ctrl+F retains Find-only navigation.
+  Keep replacement in the original buffer with native undo and dirty tracking.
+- Check selected-match safety, next-match progress, empty replacement, no matches,
+  Replace All/undo, repeated opening and Preview-only switching to editable source.
+- Exit: focused GTK regression and native suites pass, native user installation
+  updated with its explicit launcher, README/tracking/diff reviewed. No persistence
+  or schema migration is needed.
+
+Exit met: actual Ctrl+H input and replacement workflow pass; optimized build-user
+and all seven native suites pass (17 window workflows, 89.24s, no skips). The full
+run uses timeout multiplier 2 for isolated portal startup. Native install/launcher,
+schema and diff checks pass. Existing GTK test deprecation warnings remain.
+
 ## Page-wide Source/Render and scientific coverage
 
 1. Complete discovery/snapshot support for Charter; use the existing math/Mermaid/

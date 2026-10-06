@@ -2,12 +2,32 @@
 
 Legend: [ ] not started; [~] in progress; [x] completed; [!] blocked.
 
+## Rendered font scale correction
+
+- [x] Inspect current fonts, cascade, formatted scaling, preview zoom and user's
+  active settings: saved preview zoom is 2.1, prose is Monospace 11, overrides off.
+- [x] Reset preview zoom to 1.0 and verify persisted value; preserve typography,
+  writing width, notebook styles and existing documents.
+- [x] Validate the existing native typography workflow and update handoff/diff;
+  document live preview Ctrl+0 reset and restart behavior without a code rewrite.
+
 ## Planning gate
 
 - [x] Inspect build/window/project/session/navigation/editor/preview/outline/preferences/export/tests/diff/instructions.
 - [x] Confirm Move means rail ordering and CSS preserves standard important semantics.
 - [x] Populate the five user-selected .codex documents before production edits.
 - [x] Review size/state/widgets/APIs/migration/lifecycle/responsive/export risks a second time.
+
+## Find and Replace shortcut
+
+- [x] Inspect current shortcuts/search bar/search context, editor/window ownership,
+  tests, inherited diff and repository instructions; record the small shared-bar plan.
+- [x] Add Ctrl+H, replacement controls/operations and document-menu discovery;
+  preserve Ctrl+F, original-buffer undo and safe selected-match replacement.
+- [x] Add focused GTK regression for replace/replace-all, undo, repeated opening,
+  Find-only transition, no matches/deletion and Preview-only editing.
+- [x] Build/test, reinstall the native user app and restore the explicit desktop
+  launcher; update README and final tracking, inspect ownership and task diff.
 
 ## Phase 0
 

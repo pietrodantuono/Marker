@@ -78,6 +78,7 @@ void                 marker_editor_apply_prefs                   (MarkerEditor  
 void                 marker_editor_closing                       (MarkerEditor       *editor);
 
 void                 marker_editor_toggle_search_bar             (MarkerEditor       *editor);
+void                 marker_editor_show_replace_bar              (MarkerEditor       *editor);
 GtkSourceBuffer     *marker_editor_get_buffer                    (MarkerEditor       *editor);
 void                 marker_editor_set_focus_mode                (MarkerEditor       *editor,
                                                                   gboolean            enabled);

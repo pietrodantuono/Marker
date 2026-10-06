@@ -15,6 +15,7 @@
 #ifdef HAVE_XTEST
 #include <gdk/x11/gdkx.h>
 #include <X11/extensions/XTest.h>
+#include <X11/keysym.h>
 #endif
 
 static char *fixture;
@@ -333,6 +334,95 @@ test_page_files_search (void)
   settle ();
   g_autofree char *opened_name = g_file_get_basename (marker_editor_get_file (marker_window_get_active_editor (window)));
   g_assert_cmpstr (opened_name, ==, "nested.md");
+  gtk_window_destroy (GTK_WINDOW (window));
+  settle ();
+}
+
+static void
+test_find_replace (void)
+{
+  MarkerWindow *window = new_window ();
+  marker_window_new_editor (window);
+  MarkerEditor *editor = marker_window_get_active_editor (window);
+  MarkerSourceView *source = marker_editor_get_source_view (editor);
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER (marker_editor_get_buffer (editor));
+  marker_editor_set_view_mode (editor, EDITOR_ONLY_MODE);
+  marker_source_view_set_text (source, "cat cat dog", -1);
+  gtk_widget_grab_focus (GTK_WIDGET (source));
+  settle ();
+  GtkSearchBar *bar = GTK_SEARCH_BAR (find_widget (GTK_WIDGET (editor), GTK_TYPE_SEARCH_BAR));
+  g_auto (GStrv) accels = gtk_application_get_accels_for_action (app, "win.replace");
+  g_assert_nonnull (accels[0]);
+#ifdef HAVE_XTEST
+  if (GDK_IS_X11_DISPLAY (gtk_widget_get_display (GTK_WIDGET (window))))
+    {
+      Display *display = gdk_x11_display_get_xdisplay (gtk_widget_get_display (GTK_WIDGET (window)));
+      XTestFakeKeyEvent (display, XKeysymToKeycode (display, XK_Control_L), TRUE, CurrentTime);
+      XTestFakeKeyEvent (display, XKeysymToKeycode (display, XK_h), TRUE, CurrentTime);
+      XTestFakeKeyEvent (display, XKeysymToKeycode (display, XK_h), FALSE, CurrentTime);
+      XTestFakeKeyEvent (display, XKeysymToKeycode (display, XK_Control_L), FALSE, CurrentTime);
+      XFlush (display);
+      settle ();
+      g_assert_true (gtk_search_bar_get_search_mode (bar));
+    }
+#endif
+  activate (window, "replace");
+  g_assert_true (gtk_search_bar_get_search_mode (bar));
+  GtkSearchEntry *find = GTK_SEARCH_ENTRY (find_widget (GTK_WIDGET (bar), GTK_TYPE_SEARCH_ENTRY));
+  GtkEntry *replacement = GTK_ENTRY (find_widget (GTK_WIDGET (bar), GTK_TYPE_ENTRY));
+  GtkWidget *replace = find_button (GTK_WIDGET (bar), "Replace");
+  GtkWidget *replace_all = find_button (GTK_WIDGET (bar), "Replace All");
+  g_assert_true (gtk_widget_get_visible (gtk_widget_get_parent (replace)));
+  gtk_editable_set_text (GTK_EDITABLE (find), "cat");
+  gtk_editable_set_text (GTK_EDITABLE (replacement), "fox");
+  settle ();
+  g_signal_emit_by_name (find, "next-match");
+  GtkTextIter start, end;
+  g_assert_true (gtk_text_buffer_get_selection_bounds (buffer, &start, &end));
+  g_assert_cmpint (gtk_text_iter_get_offset (&start), ==, 4);
+  g_signal_emit_by_name (find, "previous-match");
+  g_signal_emit_by_name (replace, "clicked");
+  g_autofree char *text = marker_source_view_get_text (source);
+  g_assert_cmpstr (text, ==, "fox cat dog");
+  g_assert_true (marker_editor_has_unsaved_changes (editor));
+  g_assert_true (gtk_text_buffer_get_selection_bounds (buffer, &start, &end));
+  g_assert_cmpint (gtk_text_iter_get_offset (&start), ==, 4);
+  gtk_text_buffer_undo (buffer);
+  gtk_editable_set_text (GTK_EDITABLE (find), "cat");
+  g_signal_emit_by_name (replace_all, "clicked");
+  g_clear_pointer (&text, g_free);
+  text = marker_source_view_get_text (source);
+  g_assert_cmpstr (text, ==, "fox fox dog");
+  gtk_text_buffer_undo (buffer);
+  g_clear_pointer (&text, g_free);
+  text = marker_source_view_get_text (source);
+  g_assert_cmpstr (text, ==, "cat cat dog");
+  gtk_editable_set_text (GTK_EDITABLE (replacement), "");
+  g_signal_emit_by_name (replace_all, "clicked");
+  g_clear_pointer (&text, g_free);
+  text = marker_source_view_get_text (source);
+  g_assert_cmpstr (text, ==, "  dog");
+  gtk_editable_set_text (GTK_EDITABLE (find), "absent");
+  g_signal_emit_by_name (replace, "clicked");
+  g_signal_emit_by_name (replace_all, "clicked");
+  gtk_editable_set_text (GTK_EDITABLE (find), "");
+  g_signal_emit_by_name (replace_all, "clicked");
+  g_clear_pointer (&text, g_free);
+  text = marker_source_view_get_text (source);
+  g_assert_cmpstr (text, ==, "  dog");
+  activate (window, "search");
+  g_assert_true (gtk_search_bar_get_search_mode (bar));
+  g_assert_false (gtk_widget_get_visible (gtk_widget_get_parent (replace)));
+  activate (window, "search");
+  g_assert_false (gtk_search_bar_get_search_mode (bar));
+  marker_editor_set_view_mode (editor, PREVIEW_ONLY_MODE);
+  activate (window, "replace");
+  g_assert_cmpint (marker_editor_get_view_mode (editor), ==, EDITOR_ONLY_MODE);
+  marker_editor_set_view_mode (editor, FORMATTED_MODE);
+  activate (window, "replace");
+  g_assert_cmpint (marker_editor_get_view_mode (editor), ==, FORMATTED_MODE);
+  g_signal_emit_by_name (find, "stop-search");
+  g_assert_false (gtk_search_bar_get_search_mode (bar));
   gtk_window_destroy (GTK_WINDOW (window));
   settle ();
 }
@@ -1401,6 +1491,7 @@ main (int argc, char **argv)
   g_test_add_func ("/window/navigation", test_navigation);
   g_test_add_func ("/window/notebook-remove", test_notebook_remove);
   g_test_add_func ("/window/pages-files-search", test_page_files_search);
+  g_test_add_func ("/window/find-replace", test_find_replace);
   g_test_add_func ("/window/default-typography", test_default_typography);
   g_test_add_func ("/window/document-surface", test_document_surface);
   g_test_add_func ("/window/spell-check", test_spell_check);

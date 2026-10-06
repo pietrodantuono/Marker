@@ -23,8 +23,12 @@ Meson reinstalls the generic desktop entry, so restore its explicit Exec afterwa
 application ID and explicitly uses `Exec=/home/pietro/.local/bin/marker %U`.
 Desktop entry validation and desktop database refresh pass.
 
-The installed executable and `build-user/marker` have the same SHA-256:
+At scientific-proof capture time, the installed executable and `build-user/marker`
+had the same SHA-256:
 `6104e2b576d361e258936b46a3669c361f93e836401185bac2178abea4972037`.
+The later Ctrl+H update replaces the executable; this hash identifies the captured
+scientific build. Use `sha256sum build-user/marker "$HOME/.local/bin/marker"` to
+compare the current build with the current installation.
 The earlier `/usr/local` installation already contained the feature; it was
 not the reason the Source/Render control was missing.
 

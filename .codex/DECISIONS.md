@@ -1,5 +1,34 @@
 # Decisions
 
+## Decision: reuse the editor search bar for Ctrl+H replacement
+
+Status: accepted
+Date: 2026-10-06
+
+### Context
+
+Ctrl+F already uses an editor-owned GtkSearchBar and GtkSourceSearchContext, but
+there are no replacement controls. The user requests Ctrl+H Find and Replace.
+
+### Decision
+
+Extend the same bar with an optional replacement row. Use GtkSourceView's match
+replacement and Replace All on the canonical buffer with native undo. Register a
+window action/shortcut and document-menu item. Repeated Ctrl+H keeps the bar open;
+Ctrl+F returns to Find-only. Preview-only switches to editable source for replacement.
+Find navigation starts after the selected match instead of selecting it repeatedly.
+
+### Alternatives considered
+
+Add a separate dialog/search model; implement manual string replacement; expose
+only a shortcut without replacement controls. These duplicate existing ownership,
+lose native match/undo behavior, or fail the requested workflow.
+
+### Consequences
+
+No settings migration, dependency or extra buffer. Search/replace widgets and
+signals follow existing editor ownership. Regression coverage must exercise actual
+Ctrl+H input, both operations/undo and the Ctrl+F transition.
 ## Decision: install natively in the user's prefix and verify the installed executable
 
 Status: accepted

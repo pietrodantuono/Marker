@@ -80,6 +80,7 @@ marker_init (void)
     { "win.save-as", { "<Ctrl><Shift>S", NULL } },
     { "win.close-document", { "<Ctrl>W", NULL } },
     { "win.search", { "<Ctrl>F", NULL } },
+    { "win.replace", { "<Ctrl>H", NULL } },
     { "win.bold", { "<Ctrl>B", NULL } },
     { "win.italic", { "<Ctrl>I", NULL } },
     { "win.monospace", { "<Ctrl>M", NULL } },

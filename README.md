@@ -263,6 +263,10 @@ can load relative CSV, DAT and TXT files. Changes to linked data refresh charts 
 Render. Missing images or failed renders leave editable source with an explanation;
 switch to Source, correct the problem and choose Render to retry.
 
+The HTML preview remembers its zoom independently of the editor font. If rendered
+text looks unusually large, click the preview pane and press **Ctrl+0** to restore
+100% zoom. **Ctrl++** and **Ctrl+-** adjust preview zoom.
+
 Print and export render explicitly even while the writing page is in Source, so
 the saved output can still contain scientific figures.
 
@@ -285,6 +289,11 @@ contains **Save As**, **Export** and **Print**, alongside source search and wind
 options. HTML, PDF and LaTeX export are built in. DOCX, ODT and RTF need Pandoc;
 the local Flatpak manifest does not bundle it, so those formats require Pandoc
 inside the app's environment.
+
+**Ctrl+F** opens Find in the document source. **Ctrl+H** opens Find and Replace:
+enter the search text and replacement, then choose **Replace** or **Replace All**.
+An empty replacement deletes matches; replacements support Undo. Find and Replace
+is also available in the document overflow menu.
 
 ## Development
 

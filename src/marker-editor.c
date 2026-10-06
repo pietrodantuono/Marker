@@ -27,6 +27,8 @@ struct _MarkerEditor
   gboolean render_inline;
   GtkSearchBar *search_bar;
   GtkSearchEntry *search_entry;
+  GtkWidget *replace_row;
+  GtkEntry *replace_entry;
   GtkWidget *preview_window;
   GtkDropDown *heading_chooser;
   gboolean heading_sync;
@@ -166,7 +168,10 @@ search (MarkerEditor *self,
   gboolean found;
 
   gtk_source_search_settings_set_search_text (settings, text);
-  gtk_text_buffer_get_iter_at_mark (buffer, &cursor, gtk_text_buffer_get_insert (buffer));
+  if (gtk_text_buffer_get_selection_bounds (buffer, &start, &end))
+    cursor = forward ? end : start;
+  else
+    gtk_text_buffer_get_iter_at_mark (buffer, &cursor, gtk_text_buffer_get_insert (buffer));
   found = forward
             ? gtk_source_search_context_forward (context, &cursor, &start, &end, &wrapped)
             : gtk_source_search_context_backward (context, &cursor, &start, &end, &wrapped);
@@ -186,6 +191,60 @@ search (MarkerEditor *self,
       gtk_text_buffer_select_range (buffer, &start, &end);
       gtk_text_view_scroll_to_iter (GTK_TEXT_VIEW (self->source_view), &start, .15, FALSE, 0, 0);
     }
+}
+
+static void
+replace_cb (GtkWidget    *widget,
+            MarkerEditor *self)
+{
+  GtkSourceSearchContext *context = marker_source_get_search_context (self->source_view);
+  GtkSourceSearchSettings *settings = gtk_source_search_context_get_settings (context);
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER (marker_editor_get_buffer (self));
+  const char *text = gtk_editable_get_text (GTK_EDITABLE (self->search_entry));
+  const char *replacement = gtk_editable_get_text (GTK_EDITABLE (self->replace_entry));
+  GtkTextIter cursor, start, end;
+
+  if (*text == '\0')
+    return;
+  gtk_source_search_settings_set_search_text (settings, text);
+  if (gtk_text_buffer_get_selection_bounds (buffer, &start, &end))
+    cursor = start;
+  else
+    gtk_text_buffer_get_iter_at_mark (buffer, &cursor, gtk_text_buffer_get_insert (buffer));
+  if (!gtk_source_search_context_forward (context, &cursor, &start, &end, NULL))
+    {
+      gtk_text_buffer_get_start_iter (buffer, &cursor);
+      if (!gtk_source_search_context_forward (context, &cursor, &start, &end, NULL))
+        return;
+    }
+  if (gtk_source_search_context_replace (context, &start, &end, replacement, -1, NULL))
+    {
+      gtk_text_buffer_place_cursor (buffer, &end);
+      search (self, TRUE);
+    }
+}
+
+static void
+replace_all_cb (GtkWidget    *widget,
+                MarkerEditor *self)
+{
+  GtkSourceSearchContext *context = marker_source_get_search_context (self->source_view);
+  GtkSourceSearchSettings *settings = gtk_source_search_context_get_settings (context);
+  const char *text = gtk_editable_get_text (GTK_EDITABLE (self->search_entry));
+
+  if (*text == '\0')
+    return;
+  gtk_source_search_settings_set_search_text (settings, text);
+  gtk_source_search_context_replace_all (context,
+    gtk_editable_get_text (GTK_EDITABLE (self->replace_entry)), -1, NULL);
+}
+
+static void
+close_search_cb (GtkWidget    *widget,
+                 MarkerEditor *self)
+{
+  gtk_search_bar_set_search_mode (self->search_bar, FALSE);
+  gtk_widget_grab_focus (GTK_WIDGET (self->source_view));
 }
 
 static void
@@ -386,6 +445,7 @@ static GtkWidget *
 create_search_bar (MarkerEditor *self)
 {
   GtkWidget *bar = gtk_search_bar_new ();
+  GtkWidget *rows = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
   GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
   GtkWidget *previous = icon_button ("go-up-symbolic", "Previous match");
   GtkWidget *next = icon_button ("go-down-symbolic", "Next match");
@@ -397,15 +457,30 @@ create_search_bar (MarkerEditor *self)
   gtk_box_append (GTK_BOX (box), previous);
   gtk_box_append (GTK_BOX (box), next);
   gtk_box_append (GTK_BOX (box), close);
-  gtk_search_bar_set_child (GTK_SEARCH_BAR (bar), box);
+  gtk_box_append (GTK_BOX (rows), box);
+  self->replace_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+  self->replace_entry = GTK_ENTRY (gtk_entry_new ());
+  gtk_entry_set_placeholder_text (self->replace_entry, _("Replace with…"));
+  gtk_widget_set_hexpand (GTK_WIDGET (self->replace_entry), TRUE);
+  GtkWidget *replace = gtk_button_new_with_label (_("Replace"));
+  GtkWidget *replace_all = gtk_button_new_with_label (_("Replace All"));
+  gtk_box_append (GTK_BOX (self->replace_row), GTK_WIDGET (self->replace_entry));
+  gtk_box_append (GTK_BOX (self->replace_row), replace);
+  gtk_box_append (GTK_BOX (self->replace_row), replace_all);
+  gtk_widget_set_visible (self->replace_row, FALSE);
+  gtk_box_append (GTK_BOX (rows), self->replace_row);
+  gtk_search_bar_set_child (GTK_SEARCH_BAR (bar), rows);
   gtk_search_bar_connect_entry (GTK_SEARCH_BAR (bar), GTK_EDITABLE (self->search_entry));
   g_signal_connect (self->search_entry, "search-changed", G_CALLBACK (search_changed_cb), self);
   g_signal_connect (self->search_entry, "next-match", G_CALLBACK (search_next_cb), self);
   g_signal_connect (self->search_entry, "previous-match", G_CALLBACK (search_previous_cb), self);
   g_signal_connect (previous, "clicked", G_CALLBACK (search_previous_cb), self);
   g_signal_connect (next, "clicked", G_CALLBACK (search_next_cb), self);
-  g_signal_connect_swapped (close, "clicked",
-                            G_CALLBACK (marker_editor_toggle_search_bar), self);
+  g_signal_connect (replace, "clicked", G_CALLBACK (replace_cb), self);
+  g_signal_connect (replace_all, "clicked", G_CALLBACK (replace_all_cb), self);
+  g_signal_connect (self->replace_entry, "activate", G_CALLBACK (replace_cb), self);
+  g_signal_connect (close, "clicked", G_CALLBACK (close_search_cb), self);
+  g_signal_connect (self->search_entry, "stop-search", G_CALLBACK (close_search_cb), self);
   self->search_bar = GTK_SEARCH_BAR (bar);
   return bar;
 }
@@ -855,10 +930,22 @@ marker_editor_closing (MarkerEditor *self)
 void
 marker_editor_toggle_search_bar (MarkerEditor *self)
 {
-  gboolean enabled = !gtk_search_bar_get_search_mode (self->search_bar);
+  gboolean enabled = !gtk_search_bar_get_search_mode (self->search_bar) ||
+                     gtk_widget_get_visible (self->replace_row);
+  gtk_widget_set_visible (self->replace_row, FALSE);
   gtk_search_bar_set_search_mode (self->search_bar, enabled);
   if (enabled)
     gtk_widget_grab_focus (GTK_WIDGET (self->search_entry));
+}
+
+void
+marker_editor_show_replace_bar (MarkerEditor *self)
+{
+  if (self->view_mode == PREVIEW_ONLY_MODE)
+    marker_editor_set_view_mode (self, EDITOR_ONLY_MODE);
+  gtk_widget_set_visible (self->replace_row, TRUE);
+  gtk_search_bar_set_search_mode (self->search_bar, TRUE);
+  gtk_widget_grab_focus (GTK_WIDGET (self->search_entry));
 }
 
 

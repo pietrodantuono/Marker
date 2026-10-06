@@ -1,12 +1,26 @@
 # Current status
 
-Current phase: Page-wide Source/Render and scientific coverage complete.
-Current task: Complete; native user installation and proof captured.
-Last completed task: Reviewed installed-app renders and released Source/Render clicks; build-user suites pass 7/7.
-Next task: Run marker and select Formatted Markdown with Ctrl+5; follow INSTALLATION-PROOF.md for updates.
+Current phase: Rendered font scale correction complete.
+Current task: Complete; saved preview zoom reset from 210% to 100%.
+Last completed task: Settings readback and native typography workflow pass; README and task diff reviewed.
+Next task: Open Marker with normal zoom; focused HTML preview Ctrl+0 resets future zoom changes.
 
 # Completed
 
+- Font scale follow-up (2026-10-06): actual user preview-zoom-level was 2.1 with
+  Monospace 11 prose, 640px measure and disabled theme/font overrides. Reset that
+  one preference to its existing 1.0 default; font, hierarchy, notebook styles and
+  source were preserved. Native /window/default-typography passes (2.17s); installed
+  executable matches build-user. No production rebuild/change is required. README
+  explains focused HTML preview Ctrl+0 and zoom adjustments. No Marker process was
+  running at inspection; existing open panes require Ctrl+0 or a restart to update.
+- Ctrl+H follow-up (2026-10-06): added editor-owned replacement row and window
+  shortcut/menu action, Replace/Replace All with native match/undo support, empty
+  replacement deletion and Preview-only transition to editable source. Ctrl+F
+  returns to Find-only; search navigation advances past the selected match.
+  Focused real-keyboard Ctrl+H regression and all seven native suites pass (17
+  window workflows, 89.24s; no skips). README/feature/plan/decision/tasks agree;
+  build-user is reinstalled and the explicit user desktop launcher restored.
 - Installation proof (2026-10-06): optimized build-user and full ~/.local install
   succeed; shell marker/user desktop Exec target the installed executable and
   build/install SHA-256 match. Seven isolated native suites pass (86.92s window
@@ -581,11 +595,23 @@ already present. Host tool installation is not completed because sudo needs a pa
 
 ## Implemented
 
+Rendered-size follow-up corrects the user's saved 210% preview zoom to 100%.
+Shared Monospace 11pt typography, 640px measure and heading hierarchy are retained;
+no production source/schema/default changes were needed for this issue. Existing
+native typography validation passes and README documents the preview zoom reset.
+
+Ctrl+H now opens Find and Replace in the existing editor search bar; Replace and
+Replace All use the canonical buffer and native undo. Empty replacement deletes
+matches. Ctrl+F remains Find-only; next/previous find navigation advances correctly.
+The document menu exposes replacement. Preview-only opens editable source for it.
+Native ~/.local installation is updated; restart an older process to use Ctrl+H.
+
 Native user installation is complete: `marker` and the explicit user desktop entry
 select ~/.local/bin/marker from build-user. Direct installed-app captures in
 INSTALLATION-PROOF.md demonstrate all four scientific engines and released-button
 Source/Render. The user's saved Dual Pane view hides the Formatted-only control;
-Ctrl+5 exposes it. No app source or existing notebook/settings were changed here.
+Ctrl+5 exposes it. That earlier installation-only chunk changed no app source or
+existing notebooks/settings; the subsequent Ctrl+H chunk updates editor code.
 
 Formatted Markdown supports gnuplot, Mermaid, Charter and inline/display/fenced
 KaTeX or MathJax using the existing scientific renderer. Charter's existing setting
@@ -606,6 +632,10 @@ native compatibility, notebook navigation, styles, source fidelity and exports r
 
 ## Important architectural decisions
 
+Find/replace shares the editor's existing search context/bar; no separate dialog,
+search model, buffer, preference or persistence migration. Widget/signal ownership
+stays with the editor and GtkSourceView owns replacement/undo semantics.
+
 Use a correctly configured user-prefix build instead of requiring authenticated
 system installation. Keep the application ID/profile and install all runtime
 assets through Meson. Proof runs the installed executable separately from tests
@@ -621,6 +651,14 @@ Print retains its editor and waits for WebKit job completion before pausing agai
 MathJax fallback origin/version/hash/license are recorded beside the unmodified asset.
 
 ## Validation performed
+
+Ctrl+H follow-up: optimized native build and all seven suites pass on isolated Xvfb
+(17 window workflows, 89.24s, no skips; timeout multiplier 2 for portal startup).
+Actual Ctrl+H key dispatch, repeated opening, selected-match navigation, replacement,
+Replace All/atomic undo, deletion, absent/empty queries, Ctrl+F transition, close and
+source/formatted/preview mode behavior are covered. Native install hashes match;
+desktop entry/schema/diff checks pass. No new production warnings; existing GTK
+test-helper deprecations and isolated portal/EGL diagnostics remain.
 
 Installation follow-up: build-user optimized build/install, matching binary hashes,
 desktop-entry validation, strict schemas/resources and task diff review pass.

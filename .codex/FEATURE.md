@@ -130,6 +130,12 @@ project workflows.
 
 ## Acceptance criteria and definition of done
 
+Document search supports Ctrl+F for Find and Ctrl+H for Find and Replace in a
+shared editor search bar. Replace/Replace All modify the canonical source buffer,
+support Undo and allow empty replacements for deletion; no-match/empty searches
+leave text unchanged. The document menu exposes Find and Replace. Preview-only
+opens an editable source view when replacement is requested.
+
 ### Inline rich elements in Formatted Markdown (follow-up)
 
 - Images, mathematical expressions, Markdown tables and scientific fences render

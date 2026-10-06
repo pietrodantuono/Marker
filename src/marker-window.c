@@ -757,6 +757,16 @@ action_search (GSimpleAction *action,
 }
 
 static void
+action_replace (GSimpleAction *action,
+                GVariant      *parameter,
+                gpointer       user_data)
+{
+  MarkerEditor *editor = marker_window_get_active_editor (MARKER_WINDOW (user_data));
+  if (editor != NULL)
+    marker_editor_show_replace_bar (editor);
+}
+
+static void
 action_save (GSimpleAction *action,
              GVariant      *parameter,
              gpointer       user_data)
@@ -1118,6 +1128,7 @@ static const GActionEntry window_actions[] = {
   { "reload", action_reload },
   { "close-document", action_close_document },
   { "search", action_search },
+  { "replace", action_replace },
   { "sidebar", action_sidebar },
   { "notebooks", action_notebooks },
   { "outline", action_outline, NULL, "false" },
@@ -1186,6 +1197,7 @@ create_header_bar (MarkerWindow *self)
   g_menu_append (document, _("Export…"), "win.export");
   g_menu_append (document, _("Print…"), "win.print");
   g_menu_append (document, _("Find in Source…"), "win.search");
+  g_menu_append (document, _("Find and Replace…"), "win.replace");
   g_menu_append (document, _("Close Page"), "win.close-document");
   g_menu_append_section (menu, NULL, G_MENU_MODEL (document));
   g_menu_append_submenu (navigation, _("View Mode"), G_MENU_MODEL (view));
