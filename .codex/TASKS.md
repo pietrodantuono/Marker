@@ -95,6 +95,38 @@ Legend: [ ] not started; [~] in progress; [x] completed; [!] blocked.
 
 ## Phase 6: inline rich elements
 
+- [x] User-visible installation proof: rebuild/install native checkout in ~/.local,
+  explicitly target it from the user desktop launcher, capture the installed app's
+  scientific Render and Source views and retain commands/evidence in this workspace.
+- [x] Run build-user's seven suites on isolated Xvfb; record the first live-desktop
+  failure and review actual installed-app MathJax/Mermaid/Charter/gnuplot captures.
+  Released Source click stays raw without selection; a second click resumes renders.
+- [x] Complete Charter discovery/snapshots and usable local MathJax fallback;
+  verify Mermaid and mathematical inline/display/fenced rendering.
+- [x] Add one page-wide Source/Render control; remove per-region buttons and dead
+  cursor-toggle/pinning APIs; preserve same-buffer editing, undo and view modes.
+- [x] Source pauses/disposes rendering and monitoring; skip hidden duplicate
+  preview conversion in Formatted mode; prepare Print explicitly and preserve exports.
+- [x] Update real-pointer, scientific/error/refresh tests and README; run native/
+  modern suites, inspect ownership/diff and update final .codex handoff.
+- [x] Fix stale title/Save after Source edit/undo: use GtkTextBuffer's actual
+  modified-changed signal and assert the visible document title after undo.
+- [x] Supersede authenticated system-reinstall handoff with a native user install:
+  build-user targets ~/.local; user desktop Exec and shell marker select it.
+  Earlier /usr/local matched build-native at inspection. No system files or user
+  settings were changed; see INSTALLATION-PROOF.md for commands and identity.
+
+Earlier per-region completed tasks below are historical; page-wide control now
+supersedes their buttons and explicit region-pinning state (see DECISIONS).
+
+- [x] Reproduce and fix real-pointer Source/Render interaction: test native press
+  and release without selection, trace ancestor gestures and layout, verify repeated
+  toggles/persistence and run native/modern suites. Earlier signal-only tests missed
+  the user-reported behavior; do not treat them as mouse validation.
+
+- [x] Fix Source/Render choice persistence: reproduce no-selection refresh failure,
+  preserve explicit per-region Source across caret/refresh/resize/edit/undo, and
+  verify Render resets only its chosen region on native and modern builds.
 - [x] Inspect current editor/preview/parser/export/tests/diff; record specification,
   architecture and second planning pass before production edits.
 - [x] Add Unicode rich-region discovery/annotation using shared protected blocks;
@@ -115,6 +147,10 @@ Legend: [ ] not started; [~] in progress; [x] completed; [!] blocked.
 
 ## Documentation and fork merge follow-up
 
+- [x] Add dedicated README uninstall instructions for Flatpak/Flathub and Meson;
+  cover installation scope, original build/install log, desktop caches and data
+  retention. Verified generated uninstall target/dry run, Flatpak flags and 18
+  README shell examples without uninstalling the user's app.
 - [x] Load documentation-writer; verify README/build files, current captures,
   original creator/license, repository remotes, fork master and nested pointers.
 - [x] User authorized preparing the outlined documentation as a PR for review.
@@ -136,10 +172,54 @@ Legend: [ ] not started; [~] in progress; [x] completed; [!] blocked.
 
 - [x] Verify failed command, host tools, GNOME 50 runtime/SDK, existing user app
   and merged checkout. flatpak-builder is absent; the build never ran.
-- [!] Install host flatpak-builder/elfutils via the README prerequisite command.
-  sudo requires the user's password; provide interactive commands instead.
-- [ ] Rebuild local Flatpak repo, reinstall the user app and launch. Use && between
-  build/install so a missing tool cannot lead to an empty-repository install attempt.
+- [x] Record that the user replaced the Flatpak installation request with native
+  Meson installation; the host flatpak-builder setup/rebuild is no longer requested.
+- [x] Check host tools, development packages, APT candidates, pinned submodules and
+  sudo access. Zorin 18.1 lacks development packages and supplies GTK/adwaita/
+  sourceview below the current minimums; sudo requires interactive authentication.
+- [x] Attempt native Meson setup in build-native; it fails at missing gtk4.
+- [x] Make README native-first with version checks, safe chained install/update
+  commands, explicit Zorin/Ubuntu dependency caveat and Flatpak as an alternative.
+- [x] User selected adapting Marker for Zorin, conditional on preserved behavior;
+  audit and validate compatibility rather than modify minimums blindly.
+- [x] Build and test native compatibility against extracted noble development
+  packages and installed runtime libraries; Phase 7 records the actual validation.
+- [x] Prior styling/source-intent fixes are present in /usr/local from the user's
+  installation. Native development packages/build-native are available. New
+  page-wide feature installation is tracked separately under Phase 6 above.
+
+## Phase 7: Zorin native compatibility
+
+- [x] Correct reported styling regression: use Libadwaita widget styling instead of
+  importing the full Zorin theme; restore sidebar dividers and flat icon controls.
+  Build native/modern, exercise visual matrix and inspect light/dark/responsive
+  captures; native 7/7 and modern 11/11 suites pass. Native flat classes retain
+  hover/focus/checked feedback; Pages/Files and heading controls keep their fills.
+- [x] Audit noble library headers/GIR and actual Marker API/property/CSS usage;
+  identify minimum versions and specific equivalent changes before modifying code.
+- [x] Adjust verified dependency bounds and matching Debian metadata; remove GTK
+  4.16 CSS variables and use a GTK-compatible pinned libspelling fallback.
+- [x] Build against GTK 4.14/adwaita 1.5/sourceview 5.12/spelling 0.2 with extracted
+  development packages. Marker compiles cleanly; GCC 13 emits pre-existing tinyexpr
+  partial-allocation warnings and itstool Python emits escape-sequence notices.
+- [x] Fix older breakpoint-window minimum requirements and overlay scroll allocation;
+  notebook and targeted rich editing/undo/save/scroll tests pass.
+- [x] Run all seven native suites, including GTK/scientific/editing/HTML/PDF export;
+  inspect light/dark/wide/medium/narrow and rich-rendered application screenshots.
+- [x] Exercise actual spell annotations/toggle/fidelity with a dictionary on noble
+  and the modern SDK; settle loaded source/cursor before enabling the checker.
+- [x] Fix Zorin's forced-color-scheme mismatch through its optional theme-path
+  property and app-local Libadwaita base/color resources; verify explicit and system-follow
+  schemes without writing system settings.
+- [x] Verify the existing modern-library build remains supported: all eleven suites
+  pass after the reload correction, including the newer libspelling fallback tests.
+- [x] Fix the discovered reload race: cancel scientific/font readiness calls when
+  their WebKit document is superseded; preserve real rendering errors and bounded
+  waiting. Explicit editor refresh must consume its pending buffer debounce.
+- [x] Update README dependency/install commands and durable decisions/validation;
+  schema/resources/desktop/AppStream, 15 shell examples and final diff validate.
+- [x] Native compatibility/styling and the subsequent page-wide feature are
+  installed; see Phase 6's user-native installation proof.
 
 ## Fork identity and licensing clarification (2026-10-06)
 

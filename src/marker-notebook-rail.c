@@ -151,6 +151,7 @@ marker_notebook_rail_init (MarkerNotebookRail *self)
   g_menu_append (app, _("Help"), "app.help");
   g_menu_append (app, _("About Marker"), "app.about");
   gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (app_menu), "open-menu-symbolic");
+  gtk_widget_add_css_class (app_menu, "flat");
   gtk_menu_button_set_menu_model (GTK_MENU_BUTTON (app_menu), G_MENU_MODEL (app));
   gtk_widget_set_tooltip_text (app_menu, _("Main Menu"));
   gtk_widget_set_hexpand (app_menu, TRUE);
@@ -180,6 +181,7 @@ marker_notebook_rail_new (GtkSingleSelection *selection)
   g_menu_append (menu, _("New Notebook…"), "win.new-notebook");
   g_menu_append (menu, _("Open Notebook…"), "win.open-folder");
   gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (add), "list-add-symbolic");
+  gtk_widget_add_css_class (add, "flat");
   gtk_menu_button_set_menu_model (GTK_MENU_BUTTON (add), G_MENU_MODEL (menu));
   gtk_widget_set_tooltip_text (add, _("Add or Open Notebook"));
   gtk_box_append (GTK_BOX (self), add);

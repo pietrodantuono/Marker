@@ -1,11 +1,75 @@
 # Current status
 
-Current phase: Local installation follow-up; feature and documentation merged.
-Current task: Install missing host flatpak-builder; sudo requires the user's password.
-Last completed task: Verified user merged PR #1 as 40246940 and checkout is master; GNOME 50 Platform/SDK and a user Marker installation exist.
-Next task: User runs sudo apt install flatpak-builder elfutils, then builder and user reinstall in sequence; launch after successful installation.
+Current phase: Page-wide Source/Render and scientific coverage complete.
+Current task: Complete; native user installation and proof captured.
+Last completed task: Reviewed installed-app renders and released Source/Render clicks; build-user suites pass 7/7.
+Next task: Run marker and select Formatted Markdown with Ctrl+5; follow INSTALLATION-PROOF.md for updates.
 
 # Completed
+
+- Installation proof (2026-10-06): optimized build-user and full ~/.local install
+  succeed; shell marker/user desktop Exec target the installed executable and
+  build/install SHA-256 match. Seven isolated native suites pass (86.92s window
+  workflows). Three direct installed-app captures show MathJax/Mermaid/Charter,
+  Charter/gnuplot and whole-page Source. Actual press/release, scroll without
+  selection and second-click resume are visually checked. Synthetic demo and
+  INSTALLATION-PROOF document commands, identity, saved Dual Pane explanation and
+  evidence. No production source, user notebooks or existing settings changed.
+- Page-wide Source/Render (2026-10-06): one editor-owned toolbar choice replaces
+  per-region buttons/pinning/cursor-toggle API. Source restores raw Markdown and
+  cancels/disposes inline rendering; hidden full preview navigates away, disables
+  JavaScript and releases data monitors. Formatted Render avoids duplicate full
+  preview evaluation. Print prepares the full preview on demand and waits for
+  WebKit job completion before pausing again; export retains its existing shared path.
+- Charter uses existing scientific-region discovery/snapshots. Local MathJax has
+  an unmodified pinned 3.2.2 TeX/SVG fallback with Apache license/provenance when
+  system MathJax 2 is absent. Targeted native rich-editing passes with eight actual
+  regions (image, table, gnuplot, Mermaid, Charter, inline/display/fenced math), both
+  math backends, Source editing/undo/view switches, cancellation and unchanged bytes.
+  README usage describes whole-page pause/resume and explicit print/export.
+- Final validation: native 7/7 (60.92s) and modern 11/11 (57.32s) pass, with all
+  16 Marker UI/renderer workflows run. Native has no skips; modern's upstream
+  libspelling skips one optional words-database case because its database is absent.
+  Source readiness cancellation/stale commits
+  and disabled scientific preferences pass. The modified-changed correction updates
+  title/Save after undo; the visible title assertion and refreshed dark capture pass.
+  Four tracked screenshots, usage guide, task/decision/plan and final handoff agree.
+
+- Pointer correction (2026-10-06): XTest reproduced Source changing to Render on
+  press, then back on release, despite the earlier source-intent fix. Native
+  button/image gestures now claim on press, stopping ancestor caret selection
+  before native release activation. Repeated clicks, refresh, drag cancellation,
+  image activation, stable caret and unchanged bytes/dirty state pass on both stacks.
+  Optional pointer dependencies are test-only; production remains GTK-based.
+
+- Source/Render follow-up (2026-10-06): explicit Source choices survive caret
+  movement, refresh, resize and edits/undo until Render for the chosen region.
+  One per-region display mode replaces the boolean; existing live marks transfer
+  choices across rebuilds. Automatic stale/error reveals do not pin unrelated
+  regions. Deleted regions/mode switches reset ephemeral choices. Native 7/7 and
+  modern 11/11 suites pass; tracking, lifetime and task-specific diff reviewed.
+
+- Uninstall documentation: dedicated README section and navigation link cover
+  user/system Flatpak, optional profile deletion, notebook retention, Meson's
+  original build/install log, shared desktop caches and custom/user-owned prefixes.
+  Verified local Flatpak flags, Meson's uninstall implementation/target, dry-run
+  command and installed cache paths. All 18 README shell examples pass bash -n;
+  final documentation diff/anchor checks pass. No app or user data was removed.
+
+- Styling correction (2026-10-06): removed the full matching-Zorin theme import;
+  the existing provider now uses installed Libadwaita base/color resources. Restored
+  one @borders inset divider per sidebar with correct start/end and RTL orientation.
+  Rail/header/formatting icon controls explicitly use GTK flat styling. Selected
+  toggles, Pages/Files, heading chooser, native focus/hover and overlay shadows remain.
+  Native packages and build-native are now available from the user's installation.
+
+- Native installation checks (2026-10-06): current host is Zorin OS 18.1/noble.
+  Build tools and pinned submodules are present; GTK/adwaita/sourceview/WebKit/
+  spelling development packages are absent. APT candidates for GTK/adwaita/
+  sourceview are 4.14.5/1.5.0/5.12.0, below 4.18/1.7/5.14. WebKit candidate
+  2.52.6 meets the requirement; spelling 0.2.0 needs the pinned fallback.
+  Native Meson setup fails at missing gtk4. README now leads with native Meson,
+  version checks, conditional install/update commands and an explicit host caveat.
 
 - Licensing/identity clarification (2026-10-06): gnuplot is explicitly credited
   as scientific rendering; README distinguishes GPLv3 application code from the
@@ -90,12 +154,64 @@ Next task: User runs sudo apt install flatpak-builder elfutils, then builder and
 
 # In progress
 
-- Host build-tool setup only. flatpak-builder is absent, so the attempted build
-  never ran; install subsequently reports no local repository refs. sudo -n fails
-  because a password is required. User must run the existing README prerequisite
-  command interactively; no password requested or package installation claimed.
+- None for this installation/proof request. Prior product deferrals remain in TASKS.
 
 # Discovered issues
+
+- First-launch profile initialization overwrites a preseeded math backend with
+  KaTeX. Set MathJax after initialization, verify its value after launch and refresh
+  the installed Render proof; do not label a KaTeX capture as MathJax evidence.
+- The real saved view is Dual Pane. Page-wide Source/Render is visible only in
+  Formatted Markdown (Ctrl+5); the user's persisted view was not changed.
+- A first suite run on the live desktop passed 6/7 but failed window workflows
+  with gdk_surface_get_device_position after two cases. Rerunning on task-owned
+  Xvfb with cairo/local VFS passed all 7 (window workflows 86.92s, no skips).
+  Live-desktop captures also became obscured by focus changes; final proof uses
+  the installed executable on an isolated display, independently of the tests.
+- The synthetic demo originally used set terminal, which the gnuplot adapter
+  explicitly rejects because it owns terminal/output. Removed that demo command;
+  no renderer behavior was changed.
+- Installation proof follow-up: /usr/local/bin/marker now matches build-native
+  exactly and the bundled MathJax assets exist; earlier reinstall deferral is stale.
+  No Flatpak Marker or running Marker process was found. sudo -n still requires
+  authentication. User requests installation and proof, so use a native user prefix
+  and explicit user desktop Exec; capture the installed executable, not a test binary.
+
+- Screenshot review: undo restores the clean buffer but the title/Save indicator
+  stays dirty. GtkTextBuffer has a modified-changed signal, not a modified property;
+  the old notify::modified connection never updated the UI. Use the actual signal
+  and verify the visible title after Source editing/undo.
+
+- Full-suite corrections: typography/CSS/preference/export DOM tests depended on
+  a hidden preview in Formatted mode; they now explicitly select Preview. The
+  stylesheet test's fixed 350ms wait was shorter than two 180ms debounces; it now
+  waits for render completion. Source during explicit full-preview readiness must
+  wake waiters with a paused error, rather than leave their nested loop blocked.
+  The cancellation regression also awaits asynchronous blank navigation instead
+  of assuming WebKit commits it within a fixed settle interval. Modern WebKit can
+  commit a first provisional load after pause's blank request; paused load handling
+  replaces that stale commit with blank again while JavaScript stays disabled.
+
+- Charter fences are not classified as inline scientific regions. Local MathJax
+  references a missing system asset on this host. Editor refresh renders both
+  hidden full preview and inline preview on every edit; hiding a WebView alone
+  does not cancel its workers. These are dependencies of page-wide Source pause.
+
+- Native pointer regression failed before this correction despite the earlier fix:
+  the Source button is correctly hit, but ancestor caret handling reveals source
+  on press. The button's release activation then treats that as a Render request.
+  Direct clicked-signal tests bypass this dispatch path and falsely appeared fixed.
+  Optional gtk4-x11/X11/XTest dependencies now apply only to the UI test executable.
+
+- Source/Render intent was inferred from caret position during every rich-region
+  rebuild, so Source reverted on refresh/resize without a selection. Explicit
+  choices now transfer from live marks; collapsed/deleted ranges are discarded.
+
+- Phase 7: older GTK needs explicit internal overlay allocation on scroll, older
+  Adw needs a breakpoint-window minimum, and Zorin's fixed vendor Light/Dark theme
+  can disagree with the effective Adw scheme. Public allocation calls and an
+  optional-property theme adapter resolve these without duplicate widgets/state.
+  The system GTK theme remains ZorinGrey-Dark; only Marker's CSS provider changes.
 
 - GTK's overlay child lives in its internal text-window container; the public
   TextView.remove handles anchored/direct children. Use one zero-measure owning
@@ -144,6 +260,83 @@ Next task: User runs sudo apt install flatpak-builder elfutils, then builder and
   Swiss is enabled by default and overrides the preview's base font.
 
 # Validation performed
+
+- Page-wide follow-up: native 7/7 (60.92s, no skips) and modern 11/11 (57.32s) pass
+  after the final modified-signal change. Tests exercise actual scientific output,
+  both math backends, disabled preferences, Source readiness cancellation/unload,
+  real pointer dispatch, editing/undo/title/save fidelity, mode switches, CSS/data
+  pause/resume and real HTML/PDF export. Nineteen native captures generated; current
+  light/dark/narrow/reference surfaces inspected and four tracked images refreshed.
+  build-native and modern SDK compile/install pass; the native isolated asset prefix
+  validates actual offline MathJax fallback installation. Strict schemas, resources,
+  JS syntax/vendor hash/install paths, README links and task-specific diff/ownership
+  pass. Existing test deprecations remain; no new production warnings/GTK criticals.
+
+- Pointer correction: `/window/rich-pointer` fails before and passes after the
+  gesture change using real XTest motion/press/release events. Verifies unchanged
+  label/caret on press, one toggle on release, four toggles through refresh,
+  drag-away cancellation, rendered-image click and no selection/dirty/text change.
+  Native optimized build and 7/7 suites pass (16 window workflows, 58.78s, no skips);
+  modern SDK build/assets and 11/11 suites pass (56.66s), including the pointer case.
+  Suite timeout is now 90s because new pointer coverage approaches the old 60s.
+  No GTK CSS errors/criticals. Existing tinyexpr/style-helper warnings and optional
+  X11 test-backend deprecations on newer GTK remain; production adds no warnings.
+  Schemas/resources/manifests are unchanged. Ownership and task-specific diff pass.
+
+- Source/Render follow-up: the no-selection regression failed on the original
+  controller, then passed after the fix. Extended native regression exercises two
+  Source choices, refresh, 500px/1200px resizing, edits before regions, undo,
+  independent Render, unrelated regions remaining rendered and source/save fidelity.
+  Final native optimized build and all seven suites pass (51.78s, no skips).
+  Modern SDK build/assets and all eleven suites pass (49.08s). Existing GTK
+  style-context deprecation warnings are in the UI test helper, not this controller.
+  No GTK CSS errors/criticals; isolated EGL/accessibility-bus notices remain.
+  GTK button/gesture activation is automated under Xvfb; physical mouse interaction
+  was not separately exercised. Schemas/resources are unchanged by this fix.
+
+- Styling correction: normal native build-native optimized compilation and all
+  seven suites pass (15 window workflows, 49.56s, no skips); modern SDK rebuild/
+  asset install and all eleven suites pass (47.95s). Reviewed native light/dark
+  wide, medium Pages and narrow Pages/Outline plus modern light/dark wide captures
+  in two bounded inspection rounds. Borders are continuous and icon actions flat;
+  selected states and native overlay shadows remain visible. Captures are under
+  /tmp/marker-sidebar-styling-screenshots/native and ignored
+  build-gtk4/sidebar-styling-screenshots. No compiler or GTK CSS errors; isolated
+  WebKit accessibility-bus/EGL notices remain. Native test environment is explicitly
+  whitelisted to avoid inherited credentials. Schemas/resources/diff checks and
+  the one Impeccable mechanical scan pass. No new tests mirror CSS implementation.
+
+- Phase 7 native: extracted noble development packages into a task-only prefix;
+  optimized build links the host GTK 4.14.5/adwaita 1.5/sourceview 5.12/WebKit
+  2.52.6 and extracted libspelling 0.2.0. Installed assets into the validation
+  prefix. All seven suites pass, no skips (window workflows: 15 cases, final 52.46s).
+  Native WebKit sandbox remains enabled. Actual spell annotations/toggle/source
+  fidelity, rendered images/math/tables/gnuplot/Mermaid, scroll/undo/save, all view
+  modes, responsive navigation, notebook CSS refresh and HTML/PDF export pass.
+  Reviewed final native light-wide, dark-wide and rich-narrow captures from
+  /tmp/marker-zorin-compat/final-screenshots; 19 synthetic captures generated.
+  Marker compiles without C warnings; existing GCC 13 tinyexpr partial-allocation
+  warnings and external itstool Python escape-sequence notices remain.
+- Phase 7 fallback: pinned upstream libspelling 0.2.1 independently builds and
+  passes its registered cursor test in GNOME 50 SDK. Stock modern libadwaita lacks
+  Zorin's optional theme-path property and follows its original theme path.
+- Phase 7 modern: optimized SDK build/install and all eleven suites pass after
+  readiness cancellation (window workflows 47.09s). GTK 4.22/adwaita 1.9/sourceview
+  5.20/WebKit 2.54 and cached libspelling 0.4.10 remain supported. No production
+  sandbox override; the existing nested-SDK test override remains test-only.
+- Strict schemas, resource dependencies, desktop/AppStream metadata, configure
+  syntax, 15 README Bash examples and diff checks pass. AppStream retains four
+  pre-existing informational findings. Final text logs have inherited environment
+  lines redacted; never include those lines when reviewing or sharing diagnostics.
+- Initial native setup in build-native still lacks system gtk4.pc; development
+  packages are not installed on the host. sudo -n still requires a password.
+- The validation-prefix native executable opens a real X11 window with an isolated
+  memory-settings/profile and disposable Markdown. A private-bus launch accepts
+  the quit action and exits zero, but portal secret-service startup delays mapping;
+  a no-session-bus launch confirms the mapped window, then the task-owned process
+  is stopped. Isolated bus/accessibility and software-renderer EGL notices remain.
+  This is a validation-prefix launch, not /usr/local installation or desktop chooser
+  acceptance. No user document/profile or running user app was touched.
 
 - Licensing correction: inspected bundled Copyright/provenance, worker communication
   and packaging; checked upstream gnuplot terms and FSF aggregation guidance.
@@ -303,7 +496,7 @@ commits to reachable remotes before sharing the parent branch with another machi
 the parent alone cannot supply new submodule objects. Reuse these five documents for any follow-up;
 do not rebuild another parallel plan or restore inherited files over this work.
 
-# Final handoff
+# Previous handoff (phase 6)
 
 ## Implemented
 
@@ -383,3 +576,101 @@ elfutils interactively, then the README builder and flatpak install --user --rei
 commands. Chain build/install with && so failed builds do not trigger installation
 from an empty repository. GNOME 50 Platform/SDK and a user Marker installation are
 already present. Host tool installation is not completed because sudo needs a password.
+
+# Final handoff
+
+## Implemented
+
+Native user installation is complete: `marker` and the explicit user desktop entry
+select ~/.local/bin/marker from build-user. Direct installed-app captures in
+INSTALLATION-PROOF.md demonstrate all four scientific engines and released-button
+Source/Render. The user's saved Dual Pane view hides the Formatted-only control;
+Ctrl+5 exposes it. No app source or existing notebook/settings were changed here.
+
+Formatted Markdown supports gnuplot, Mermaid, Charter and inline/display/fenced
+KaTeX or MathJax using the existing scientific renderer. Charter's existing setting
+is exposed in Preferences. A pinned, licensed offline MathJax 3.2.2 fallback works
+when the preferred system MathJax 2 is absent.
+
+One page-wide Source/Render button at the right of the formatting toolbar replaces
+region buttons/pinning/cursor-toggle API. Source shows raw Markdown, stops workers/
+data monitoring and disposes the inline renderer. Render resumes from current
+source/preferences/CSS; choice survives view switches for that live editor.
+Rendered-element clicks request page Source. Existing caret/search reveals in
+Render remain local editing behavior. Formatting does not duplicate full-preview
+evaluation. Print/export render explicitly on demand. GTK's modified-changed signal
+keeps title/Save/page dirty indicators accurate after edit/undo/save.
+
+README usage and four light/dark/narrow/reference screenshots are updated. Prior
+native compatibility, notebook navigation, styles, source fidelity and exports remain.
+
+## Important architectural decisions
+
+Use a correctly configured user-prefix build instead of requiring authenticated
+system installation. Keep the application ID/profile and install all runtime
+assets through Meson. Proof runs the installed executable separately from tests
+with isolated MathJax settings, synthetic data and an unmodified WebKit sandbox.
+
+One canonical buffer and live-editor presentation choice; no persistence migration.
+One shared parser/renderer/cascade; no per-region explicit-state transfer or button
+controller observation. Picture gestures still claim press; the toolbar uses normal
+GTK button behavior. Pausing invalidates requests, cancels readiness/monitors and
+unloads scientific documents with JavaScript disabled. Stale provisional commits
+are replaced with blank; outstanding readiness waits terminate with a paused error.
+Print retains its editor and waits for WebKit job completion before pausing again.
+MathJax fallback origin/version/hash/license are recorded beside the unmodified asset.
+
+## Validation performed
+
+Installation follow-up: build-user optimized build/install, matching binary hashes,
+desktop-entry validation, strict schemas/resources and task diff review pass.
+All seven native suites pass (window workflows 86.92s; no skips) on isolated Xvfb.
+Three actual installed-app captures are reviewed; Source persists after release
+and scrolling without selection, and Render resumes equations/diagrams/charts.
+The earlier live-desktop 6/7 run hit a GDK surface assertion and is not counted as
+a pass. Portal/EGL diagnostics are documented. Temporary app/display sessions stop
+after validation; user's view preference remains Dual Pane.
+
+Final native optimized builds pass against the installed GTK 4.14/adwaita 1.5/
+SourceView 5.12/spelling 0.2 stack. All 7 suites pass (16 window workflows, 60.92s,
+no skips). The isolated native asset prefix exercises the new installed fallback;
+build-native is also compiled for system reinstall.
+Modern SDK optimized build/assets and all 11 suites pass (57.32s), including the
+final modified-signal correction and real pointer regression. All Marker workflows
+run; upstream libspelling skips one optional words-database case (database absent).
+
+Actual Mermaid/Charter/gnuplot SVG and both math backends, inline/display/fenced math,
+disabled renderer preferences, Source editing/undo/no selection/view switches,
+readiness cancellation/stale commits, real mouse press/release/drag/image activation,
+CSS/data pause/resume, unchanged saved Markdown and real HTML/PDF export are covered.
+Native visual matrix exercises defaults, persistence, light/dark and wide/medium/
+narrow layouts. Nineteen isolated captures generated; updated reference/rich images
+reviewed. Strict schemas, compiled resources, both JavaScript syntax checks, vendor
+hash/install paths, README local links and ownership/stale API/task diff review pass.
+
+## Known limitations
+
+System MathJax 2 branch is retained but this host/SDK lacks it; actual fallback
+MathJax 3 and KaTeX are tested. Physical printer/desktop chooser integrations need
+the normal desktop environment; PDF and print preparation cancellation are exercised.
+Existing nested-region/interactive-preview/local-export-asset limitations remain.
+Existing style-helper/X11 test deprecations and native tinyexpr warnings remain;
+this task adds no production compiler warnings. Isolated bus/software-renderer
+notices are environmental; no GTK CSS errors/criticals were found.
+
+## Deferred work
+
+System reinstall deferral superseded by native user installation. sudo -n still
+requires a password, but build-user is installed under ~/.local and the user
+desktop entry explicitly launches it. /usr/local already matched build-native
+at this follow-up's start. Existing system files and user settings are preserved.
+Previous desktop/package/conformance deferrals remain explicit in TASKS.
+
+## Recommended follow-up
+
+Use build-user for this user's subsequent updates: meson compile -C build-user
+then meson install -C build-user. Run marker and select Formatted Markdown (Ctrl+5).
+See INSTALLATION-PROOF.md for executable/launcher identity and capture evidence.
+No commit/push requested or performed. Inherited edits are preserved; final task
+counts compare against /tmp/marker-page-render-before. SDK diagnostic text logs
+redact inherited environment; task-owned Xvfb is stopped after validation.

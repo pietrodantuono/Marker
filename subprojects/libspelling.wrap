@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://gitlab.gnome.org/GNOME/libspelling.git
-revision = 1facdde8e1c0fd72bed806f9a9be2fbec83af5f2
+revision = 0e9b8b2187ecda4dc1ce48a9bcc9a9976490fda2
 depth = 1
 
 [provide]

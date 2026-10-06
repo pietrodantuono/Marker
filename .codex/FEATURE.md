@@ -124,7 +124,9 @@ project workflows.
   A formatted-only number gutter omits rendered ranges; source mode remains native.
 - SciDown renders scientific HTML/LaTeX. One render-style helper supplies preview,
   HTML and WebKit print/PDF; scientific readiness includes gnuplot/diagram/font work.
-- GTK4 >=4.18, Libadwaita >=1.7, GtkSourceView5 >=5.14, WebKitGTK6 >=2.50.
+- GTK4 >=4.14, Libadwaita >=1.5, GtkSourceView5 >=5.12, WebKitGTK6 >=2.50,
+  libspelling >=0.2; native Zorin support must preserve existing editor/render/export
+  behavior and remain compatible with modern libraries.
 
 ## Acceptance criteria and definition of done
 
@@ -132,15 +134,26 @@ project workflows.
 
 - Images, mathematical expressions, Markdown tables and scientific fences render
   in the writing page by default. Inline images/math retain their surrounding
-  paragraph; clicking its rendered region exposes that paragraph's source.
-- Click or activate Source to edit the original region in the existing editor;
-  Render switches back. Keyboard navigation/search into a region exposes source.
+  paragraph. Includes gnuplot, Mermaid, Charter and the selected math backend.
+- One page-wide Source/Render control in the formatting toolbar replaces region
+  buttons. Default Render; Source shows raw Markdown in the existing buffer.
+  Clicking a rendered element switches the page to Source. Keyboard navigation/
+  search can expose the active region in Render mode without a separate control.
+- Source/Render owns its pointer sequence: pressing must not move the document
+  caret or change the action before release. Dragging away cancels the click.
+- Page Source remains selected across caret changes, resize, edits/undo, preferences
+  and mode changes for that live editor; no new persisted settings or migration.
+  It cancels inline rendering and stops hidden preview workers/monitors. Edits and
+  external refreshes do not evaluate graphics until Render is requested. Printing/
+  exporting may explicitly render on demand. Render mode avoids duplicate hidden
+  full-preview evaluation. Global renderer preferences continue to apply.
 - The GtkSourceBuffer remains authoritative. Presentation must not insert object
   characters, rewrite source, change dirty state, or create a separate undo history.
 - Use the existing scientific renderer and effective notebook/global styles.
   Refresh after edits, notebook CSS changes and linked gnuplot data changes.
 - Failed/unavailable/oversized rendering leaves readable, editable source and a
-  local explanation/retry control. Other regions remain usable.
+  local explanation. Correct source and use the page control to retry; other
+  regions remain usable.
 - Rendered regions are visual snapshots; links and interactive chart controls use
   the regular preview. Complex list/quote nesting keeps source presentation until
   representative documents establish safe rendering boundaries.

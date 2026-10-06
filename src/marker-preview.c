@@ -55,6 +55,7 @@ struct _MarkerPreview
   gchar      *gnuplot_script;
   GHashTable *data_monitors;
   GError     *render_error;
+  GCancellable *resources_ready_cancellable;
   guint       data_change_source;
   gboolean    gnuplot_available;
   gboolean    gnuplot_pending;
@@ -62,6 +63,7 @@ struct _MarkerPreview
   gboolean    scroll_requested;
   gboolean    load_pending;
   gboolean    rendered;
+  gboolean    paused;
   guint       render_serial;
 };
 
@@ -78,7 +80,7 @@ static guint preview_signals[LAST_SIGNAL];
 static void
 finish_render (MarkerPreview *preview)
 {
-  if (preview->load_pending || preview->gnuplot_pending || preview->rendered)
+  if (preview->paused || preview->load_pending || preview->gnuplot_pending || preview->rendered)
     return;
   preview->rendered = TRUE;
   if (preview->scroll_requested)
@@ -506,6 +508,8 @@ resources_ready (GObject *object, GAsyncResult *result, gpointer data)
   g_autoptr (JSCValue) value = webkit_web_view_call_async_javascript_function_finish (WEBKIT_WEB_VIEW (object), result, &error);
   if (serial != preview->render_serial)
     return;
+  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    return;
   if (value == NULL)
     {
       set_render_error (preview, error);
@@ -518,14 +522,53 @@ resources_ready (GObject *object, GAsyncResult *result, gpointer data)
 }
 
 static void
+cancel_resources_ready (MarkerPreview *preview)
+{
+  if (preview->resources_ready_cancellable != NULL)
+    g_cancellable_cancel (preview->resources_ready_cancellable);
+  g_clear_object (&preview->resources_ready_cancellable);
+}
+
+void
+marker_preview_pause (MarkerPreview *preview)
+{
+  if (preview->paused) return;
+  gboolean pending = preview->load_pending || preview->gnuplot_pending;
+  preview->paused = TRUE;
+  preview->render_serial++;
+  cancel_resources_ready (preview);
+  g_clear_handle_id (&preview->data_change_source, g_source_remove);
+  g_hash_table_remove_all (preview->data_monitors);
+  preview->load_pending = preview->gnuplot_pending = FALSE;
+  preview->rendered = FALSE;
+  webkit_user_content_manager_remove_all_scripts (webkit_web_view_get_user_content_manager (WEBKIT_WEB_VIEW (preview)));
+  webkit_settings_set_enable_javascript (webkit_web_view_get_settings (WEBKIT_WEB_VIEW (preview)), FALSE);
+  webkit_web_view_stop_loading (WEBKIT_WEB_VIEW (preview));
+  /* Navigating away destroys this document's workers; hiding it would not. */
+  webkit_web_view_load_uri (WEBKIT_WEB_VIEW (preview), "about:blank");
+  /* Complete outstanding waiters with cancellation, as with rendering errors. */
+  if (pending) g_signal_emit (preview, preview_signals[RENDER_COMPLETE], 0);
+}
+
+static void
 load_changed_cb (WebKitWebView   *web_view,
                  WebKitLoadEvent  event)
 {
   MarkerPreview *preview = MARKER_PREVIEW (web_view);
 
+  if (preview->paused)
+    {
+      /* A first provisional load can commit after pause's blank request. */
+      if (event == WEBKIT_LOAD_COMMITTED &&
+          g_strcmp0 (webkit_web_view_get_uri (web_view), "about:blank") != 0)
+        webkit_web_view_load_uri (web_view, "about:blank");
+      return;
+    }
+
   switch (event)
   {
     case WEBKIT_LOAD_STARTED:
+      cancel_resources_ready (preview);
       break;
 
     case WEBKIT_LOAD_REDIRECTED:
@@ -535,6 +578,8 @@ load_changed_cb (WebKitWebView   *web_view,
       break;
 
     case WEBKIT_LOAD_FINISHED:
+      cancel_resources_ready (preview);
+      preview->resources_ready_cancellable = g_cancellable_new ();
       if (preview->manual_gnuplot) {
         preview->manual_gnuplot = FALSE;
         webkit_settings_set_enable_javascript (
@@ -562,7 +607,8 @@ load_changed_cb (WebKitWebView   *web_view,
         "await (window.markerRenderingReady || Promise.resolve());"
         "await document.fonts.ready;"
         "return Number(document.querySelector('meta[name=marker-render]')?.content || 0);",
-        -1, NULL, NULL, NULL, NULL, resources_ready, GUINT_TO_POINTER (preview->render_serial));
+        -1, NULL, NULL, NULL, preview->resources_ready_cancellable,
+        resources_ready, GUINT_TO_POINTER (preview->render_serial));
       break;
   }
 }
@@ -644,6 +690,7 @@ static void
 marker_preview_dispose (GObject *object)
 {
   MarkerPreview *preview = MARKER_PREVIEW (object);
+  cancel_resources_ready (preview);
 
   if (preview->data_change_source != 0) {
     g_source_remove (preview->data_change_source);
@@ -787,7 +834,9 @@ marker_preview_load_html (MarkerPreview *preview,
   g_autofree gchar *uri = NULL;
   WebKitUserContentManager *manager = webkit_web_view_get_user_content_manager (WEBKIT_WEB_VIEW (preview));
   gboolean gnuplot_enabled = marker_prefs_get_use_gnuplot () && preview->gnuplot_available;
+  preview->paused = FALSE;
   preview->render_serial++;
+  cancel_resources_ready (preview);
   preview->load_pending = TRUE;
   preview->rendered = FALSE;
   webkit_user_content_manager_remove_all_scripts (manager);
@@ -914,6 +963,10 @@ marker_preview_wait_ready (MarkerPreview *preview,
     g_signal_handler_disconnect (preview, handler);
   }
 
+  if (preview->paused) {
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_CLOSED, "Preview rendering is paused.");
+    return FALSE;
+  }
   if (preview->render_error != NULL) {
     g_propagate_error (error, g_error_copy (preview->render_error));
     return FALSE;
@@ -1027,7 +1080,13 @@ marker_preview_run_print_dialog(MarkerPreview* preview,
     webkit_print_operation_new(WEBKIT_WEB_VIEW(preview));
 
   g_signal_connect(print_op, "failed", G_CALLBACK(pdf_print_failed_cb), NULL);
+  g_autoptr (GMainLoop) loop = g_main_loop_new (NULL, FALSE);
+  PrintWait wait = { .loop = loop };
+  gulong finished = g_signal_connect (print_op, "finished", G_CALLBACK (pdf_print_finished_cb), &wait);
   response = webkit_print_operation_run_dialog(print_op, parent);
+  if (response == WEBKIT_PRINT_OPERATION_RESPONSE_PRINT && !wait.complete)
+    g_main_loop_run (loop);
+  g_signal_handler_disconnect (print_op, finished);
   g_object_unref (print_op);
   return response;
 }
@@ -1128,6 +1187,7 @@ marker_preview_print_pdf(MarkerPreview*     preview,
 void
 marker_preview_scroll_left (MarkerPreview *preview)
 {
+  if (preview->paused) return;
   g_autofree gchar *script = g_strdup_printf (SCROLL_STEP_SCRIPT, -SCROLL_STEP, 0);
   webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
                                        NULL, NULL, NULL, scroll_js_finished_cb, NULL);
@@ -1136,6 +1196,7 @@ marker_preview_scroll_left (MarkerPreview *preview)
 void
 marker_preview_scroll_right (MarkerPreview *preview)
 {
+  if (preview->paused) return;
   g_autofree gchar *script = g_strdup_printf (SCROLL_STEP_SCRIPT, SCROLL_STEP, 0);
   webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
                                        NULL, NULL, NULL, scroll_js_finished_cb, NULL);
@@ -1144,6 +1205,7 @@ marker_preview_scroll_right (MarkerPreview *preview)
 void
 marker_preview_scroll_up (MarkerPreview *preview)
 {
+  if (preview->paused) return;
   g_autofree gchar *script = g_strdup_printf (SCROLL_STEP_SCRIPT, 0, -SCROLL_STEP);
   webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
                                        NULL, NULL, NULL, scroll_js_finished_cb, NULL);
@@ -1152,6 +1214,7 @@ marker_preview_scroll_up (MarkerPreview *preview)
 void
 marker_preview_scroll_down (MarkerPreview *preview)
 {
+  if (preview->paused) return;
   g_autofree gchar *script = g_strdup_printf (SCROLL_STEP_SCRIPT, 0, SCROLL_STEP);
   webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
                                        NULL, NULL, NULL, scroll_js_finished_cb, NULL);
@@ -1160,6 +1223,7 @@ marker_preview_scroll_down (MarkerPreview *preview)
 void
 marker_preview_scroll_to_top (MarkerPreview *preview)
 {
+  if (preview->paused) return;
   g_autofree gchar *script = g_strdup_printf (SCROLL_SCRIPT, 0, 0);
   webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
                                        NULL, NULL, NULL, scroll_js_finished_cb, NULL);
@@ -1168,6 +1232,7 @@ marker_preview_scroll_to_top (MarkerPreview *preview)
 void
 marker_preview_scroll_to_bottom (MarkerPreview *preview)
 {
+  if (preview->paused) return;
   const gchar *script = "window.scrollTo(0,document.body.scrollHeight);";
   webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1,
                                        NULL, NULL, NULL, scroll_js_finished_cb, NULL);
@@ -1176,6 +1241,7 @@ marker_preview_scroll_to_bottom (MarkerPreview *preview)
 void
 marker_preview_scroll_to_cursor (MarkerPreview *preview)
 {
+  if (preview->paused) return;
   preview->scroll_requested = TRUE;
   if (preview->load_pending || preview->gnuplot_pending)
     return;

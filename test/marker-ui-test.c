@@ -12,6 +12,10 @@
 #include "marker-markdown.h"
 #include "scidown/src/charter/src/svg_utils.h"
 #include <glib/gstdio.h>
+#ifdef HAVE_XTEST
+#include <gdk/x11/gdkx.h>
+#include <X11/extensions/XTest.h>
+#endif
 
 static char *fixture;
 static void capture_window (MarkerWindow *window, const char *name);
@@ -32,8 +36,9 @@ assert_script (MarkerPreview *preview, const char *script)
   g_autoptr (GMainLoop) loop = g_main_loop_new (NULL, FALSE);
   ScriptResult wait = { .loop = loop };
   g_autoptr (GError) error = NULL;
-  g_assert_true (marker_preview_wait_ready (preview, &error));
+  gboolean ready = marker_preview_wait_ready (preview, &error);
   g_assert_no_error (error);
+  g_assert_true (ready);
   webkit_web_view_evaluate_javascript (WEBKIT_WEB_VIEW (preview), script, -1, NULL, NULL,
                                       NULL, script_finished, &wait);
   g_main_loop_run (loop);
@@ -356,6 +361,7 @@ test_default_typography (void)
     gtk_text_view_get_left_margin (GTK_TEXT_VIEW (source)) - gtk_text_view_get_right_margin (GTK_TEXT_VIEW (source));
   g_assert_cmpint (measure, <=, 640);
   g_assert_cmpint (measure, >=, 620);
+  marker_editor_set_view_mode (editor, PREVIEW_ONLY_MODE);
   marker_editor_refresh_preview (editor);
   assert_script (preview, "getComputedStyle(document.body).fontFamily === 'monospace' && "
     "getComputedStyle(document.querySelector('p')).fontFamily === 'monospace' && "
@@ -364,10 +370,12 @@ test_default_typography (void)
   /* Stored preferences and selected themes still override fresh defaults. */
   g_settings_set_uint (prefs.editor_settings, "writing-width", 800);
   g_settings_set_string (prefs.editor_settings, "prose-font", "Serif 12");
+  marker_editor_set_view_mode (editor, FORMATTED_MODE);
   marker_editor_apply_prefs (editor);
   settle ();
   font = pango_context_get_font_description (gtk_widget_get_pango_context (GTK_WIDGET (source)));
   g_assert_cmpint (g_ascii_strcasecmp (pango_font_description_get_family (font), "serif"), ==, 0);
+  marker_editor_set_view_mode (editor, PREVIEW_ONLY_MODE);
   marker_editor_refresh_preview (editor);
   assert_script (preview, "getComputedStyle(document.body).fontFamily === 'serif' && "
     "getComputedStyle(document.body).maxWidth === '800px'");
@@ -451,6 +459,61 @@ test_document_surface (void)
   settle ();
 }
 
+static gboolean
+has_spelling_error (GtkTextBuffer *buffer, int offset)
+{
+  GtkTextIter iter;
+  gtk_text_buffer_get_iter_at_offset (buffer, &iter, offset);
+  GSList *tags = gtk_text_iter_get_tags (&iter);
+  gboolean found = FALSE;
+  for (GSList *item = tags; item != NULL; item = item->next)
+    {
+      int underline;
+      g_object_get (item->data, "underline", &underline, NULL);
+      found |= underline == PANGO_UNDERLINE_ERROR || underline == PANGO_UNDERLINE_ERROR_LINE;
+    }
+  g_slist_free (tags);
+  return found;
+}
+
+static void
+test_spell_check (void)
+{
+  if (!spelling_provider_supports_language (spelling_provider_get_default (), "en_US"))
+    {
+      g_test_skip ("An English dictionary is required to exercise spell checking");
+      return;
+    }
+
+  MarkerWindow *window = new_window ();
+  marker_window_new_editor (window);
+  MarkerEditor *editor = marker_window_get_active_editor (window);
+  marker_editor_set_view_mode (editor, EDITOR_ONLY_MODE);
+  MarkerSourceView *source = marker_editor_get_source_view (editor);
+  GtkTextBuffer *buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (source));
+  marker_source_view_set_spell_check_lang (source, "en_US");
+  marker_source_view_set_spell_check (source, FALSE);
+  marker_source_view_set_text (source, "A qzxqzx spelling example.\n", -1);
+  GtkTextIter end;
+  gtk_text_buffer_get_end_iter (buffer, &end);
+  gtk_text_buffer_place_cursor (buffer, &end);
+  settle ();
+  marker_source_view_set_spell_check (source, TRUE);
+
+  gint64 deadline = g_get_monotonic_time () + 5 * G_TIME_SPAN_SECOND;
+  while (!has_spelling_error (buffer, 3) && g_get_monotonic_time () < deadline)
+    settle ();
+  g_assert_true (has_spelling_error (buffer, 3));
+  g_assert_false (has_spelling_error (buffer, 12));
+  marker_source_view_set_spell_check (source, FALSE);
+  settle ();
+  g_assert_false (has_spelling_error (buffer, 3));
+  g_autofree char *text = marker_source_view_get_text (source);
+  g_assert_cmpstr (text, ==, "A qzxqzx spelling example.\n");
+  gtk_window_destroy (GTK_WINDOW (window));
+  settle ();
+}
+
 static GtkWidget *
 rich_region_recursive (GtkWidget *widget, guint *index)
 {
@@ -504,13 +567,126 @@ wait_rich_pictures (MarkerSourceView *source, guint count)
   g_assert_true (ready);
 }
 
+#ifdef HAVE_XTEST
+static void
+pointer_button (MarkerWindow *window, GtkWidget *target, gboolean pressed)
+{
+  GdkSurface *surface = gtk_native_get_surface (GTK_NATIVE (window));
+  Display *display = gdk_x11_display_get_xdisplay (gdk_surface_get_display (surface));
+  if (pressed)
+    {
+      graphene_rect_t bounds;
+      g_assert_nonnull (target);
+      g_assert_true (gtk_widget_compute_bounds (target, GTK_WIDGET (window), &bounds));
+      int x, y;
+      Window child;
+      XTranslateCoordinates (display, gdk_x11_surface_get_xid (surface),
+                             DefaultRootWindow (display), 0, 0, &x, &y, &child);
+      double local_x = bounds.origin.x + bounds.size.width / 2;
+      double local_y = bounds.origin.y + bounds.size.height / 2;
+      g_assert_cmpfloat (local_y, >=, 0);
+      g_assert_cmpfloat (local_y, <, gtk_widget_get_height (GTK_WIDGET (window)));
+      GtkWidget *picked = gtk_widget_pick (GTK_WIDGET (window), local_x, local_y, GTK_PICK_DEFAULT);
+      g_assert_true (picked == target || gtk_widget_is_ancestor (picked, target));
+      XTestFakeMotionEvent (display, -1, x + local_x, y + local_y, CurrentTime);
+    }
+  XTestFakeButtonEvent (display, 1, pressed, CurrentTime);
+  XFlush (display);
+  settle ();
+}
+#endif
+
+static void
+test_rich_pointer (void)
+{
+#ifdef HAVE_XTEST
+  GdkDisplay *display = gdk_display_get_default ();
+  if (!GDK_IS_X11_DISPLAY (display))
+    { g_test_skip ("Pointer injection requires an X11 test display"); return; }
+  Display *xdisplay = gdk_x11_display_get_xdisplay (display);
+  int event, error, major, minor;
+  if (!XTestQueryExtension (xdisplay, &event, &error, &major, &minor))
+    { g_test_skip ("XTest is unavailable on the test display"); return; }
+  g_autofree char *path = g_build_filename (fixture, "pointer.md", NULL);
+  marker_prefs_set_use_dark_theme (FALSE);
+  g_settings_set_boolean (prefs.preview_settings, "css-toggle", FALSE);
+  const char *markdown = "# Pointer test\n\n![Image](data/paper.svg)\n\nEnd.\n";
+  g_assert_true (g_file_set_contents (path, markdown, -1, NULL));
+  g_autoptr (GFile) file = g_file_new_for_path (path);
+  MarkerWindow *window = new_window ();
+  marker_window_new_editor_from_file (window, file);
+  MarkerEditor *editor = marker_window_get_active_editor (window);
+  marker_editor_set_view_mode (editor, FORMATTED_MODE);
+  MarkerSourceView *source = marker_editor_get_source_view (editor);
+  wait_rich_pictures (source, 1);
+  settle ();
+  GtkTextBuffer *buffer = GTK_TEXT_BUFFER (marker_editor_get_buffer (editor));
+  for (guint i = 0; i < 4; i++)
+    {
+      const char *before = i % 2 == 0 ? "Source" : "Render";
+      const char *after = i % 2 == 0 ? "Render" : "Source";
+      int cursor = marker_source_view_get_cursor_position (source);
+      pointer_button (window, find_button (GTK_WIDGET (editor), before), TRUE);
+      /* Press must not let the ancestor text view move the caret or toggle
+       * presentation before the native button's release activation. */
+      g_assert_nonnull (find_button (GTK_WIDGET (editor), before));
+      g_assert_cmpint (marker_source_view_get_cursor_position (source), ==, cursor);
+      pointer_button (window, NULL, FALSE);
+      g_assert_nonnull (find_button (GTK_WIDGET (editor), after));
+      if (i % 2) wait_rich_pictures (source, 1);
+      else g_assert_null (rich_region (source, 0));
+      g_assert_false (gtk_text_buffer_get_has_selection (buffer));
+      marker_editor_refresh_preview (editor);
+      if (i % 2) wait_rich_pictures (source, 1);
+      settle ();
+      g_assert_nonnull (find_button (GTK_WIDGET (editor), after));
+    }
+  /* Dragging away cancels a button click rather than starting a text selection. */
+  pointer_button (window, find_button (GTK_WIDGET (editor), "Source"), TRUE);
+  XTestFakeMotionEvent (xdisplay, -1, 1500, 950, CurrentTime);
+  pointer_button (window, NULL, FALSE);
+  g_assert_nonnull (find_button (GTK_WIDGET (editor), "Source"));
+  g_assert_false (gtk_text_buffer_get_has_selection (buffer));
+  /* A rendered image must also own its click sequence. */
+  pointer_button (window, find_widget (rich_region (source, 0), GTK_TYPE_PICTURE), TRUE);
+  g_assert_nonnull (find_button (GTK_WIDGET (editor), "Source"));
+  pointer_button (window, NULL, FALSE);
+  g_assert_nonnull (find_button (GTK_WIDGET (editor), "Render"));
+  g_assert_false (gtk_text_buffer_get_has_selection (buffer));
+  g_assert_null (rich_region (source, 0));
+  g_autofree char *unchanged = marker_source_view_get_text (source);
+  g_assert_cmpstr (unchanged, ==, markdown);
+  g_assert_false (marker_editor_has_unsaved_changes (editor));
+  gtk_window_destroy (GTK_WINDOW (window));
+  settle ();
+  g_remove (path);
+#else
+  g_test_skip ("Build with optional GTK X11/XTest development libraries for pointer regression");
+#endif
+}
+
+static void
+render_count_cb (MarkerPreview *preview, guint *count)
+{
+  (*count)++;
+}
+
+static gboolean
+click_button_cb (gpointer button)
+{
+  g_signal_emit_by_name (button, "clicked");
+  return G_SOURCE_REMOVE;
+}
+
 static void
 test_rich_editing (void)
 {
   g_settings_set_boolean (prefs.preview_settings, "mathjs-toggle", TRUE);
   g_settings_set_boolean (prefs.preview_settings, "mermaid-toggle", TRUE);
   g_settings_set_boolean (prefs.preview_settings, "gnuplot-toggle", TRUE);
+  g_settings_set_boolean (prefs.preview_settings, "charter-toggle", TRUE);
   g_settings_set_boolean (prefs.preview_settings, "css-toggle", FALSE);
+  marker_prefs_set_math_backend (KATEX);
   marker_prefs_set_use_dark_theme (FALSE);
   g_autofree char *path = g_build_filename (fixture, "rich.md", NULL);
   g_autofree char *image = g_build_filename (fixture, "data", "inline-image.svg", NULL);
@@ -520,7 +696,9 @@ test_rich_editing (void)
     "Inline $x^2$ stays with its paragraph.\n\n"
     "| Name | Value |\n| --- | ---: |\n| A | 12 |\n\n"
     "```gnuplot\nset samples 20\nplot sin(x)\n```\n\n"
-    "```mermaid\ngraph TD\n A --> B\n```\n\nEnd.\n";
+    "```mermaid\ngraph TD\n A --> B\n```\n\n"
+    "```charter\nplot\n x range: 1 10 3\n y math: 2*x\n```\n\n"
+    "$$\nx^2 + y^2\n$$\n\n```math\n\\frac{1}{2}\n```\n\nEnd.\n";
   g_assert_true (g_file_set_contents (path, markdown, -1, NULL));
   g_autoptr (GFile) file = g_file_new_for_path (path);
   MarkerWindow *window = new_window ();
@@ -529,95 +707,123 @@ test_rich_editing (void)
   marker_editor_set_view_mode (editor, FORMATTED_MODE);
   MarkerSourceView *source = marker_editor_get_source_view (editor);
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER (marker_editor_get_buffer (editor));
-  wait_rich_pictures (source, 5);
+  wait_rich_pictures (source, 8);
   settle ();
-  g_assert_false (marker_editor_has_unsaved_changes (editor));
-  g_autofree char *original = marker_source_view_get_text (source);
-  g_assert_cmpstr (original, ==, markdown);
   MarkerPreview *renderer = MARKER_PREVIEW (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
-  assert_script (renderer, "!!document.querySelector('.katex') && !!document.querySelector('table') && "
+  assert_script (renderer, "document.querySelectorAll('.katex').length >= 3 && "
     "!!document.querySelector('.gnuplot-preview svg') && !!document.querySelector('.mermaid svg') && "
-    "document.querySelector('img').naturalWidth > 0");
-  for (guint i = 0; i < 5; i++)
+    "!!document.querySelector('svg.charter') && document.querySelector('img').naturalWidth > 0");
+  for (guint i = 0; i < 8; i++)
     {
       GtkWidget *region = rich_region (source, i);
-      GtkWidget *picture = find_widget (region, GTK_TYPE_PICTURE);
-      g_assert_true (gtk_widget_get_visible (picture));
-      g_assert_cmpint (gtk_widget_get_height (picture), >, 0);
+      g_assert_null (find_button (region, "Source"));
+      g_assert_true (gtk_widget_get_visible (find_widget (region, GTK_TYPE_PICTURE)));
     }
   capture_window (window, "rich-light");
-  GtkWidget *region = rich_region (source, 0);
-  GtkWidget *picture = find_widget (region, GTK_TYPE_PICTURE);
-  g_autoptr (GListModel) controllers = gtk_widget_observe_controllers (picture);
-  for (guint i = 0; i < g_list_model_get_n_items (controllers); i++)
+  guint renders = 0;
+  MarkerPreview *full = marker_editor_get_preview (editor);
+  /* Source also cancels a full-preview readiness wait (e.g. Print preparation). */
+  marker_preview_render_markdown (full, markdown, NULL, path, NULL, -1);
+  g_idle_add (click_button_cb, find_button (GTK_WIDGET (editor), "Source"));
+  g_autoptr (GError) paused = NULL;
+  g_assert_false (marker_preview_wait_ready (full, &paused));
+  g_assert_error (paused, G_IO_ERROR, G_IO_ERROR_CLOSED);
+  gulong handler = g_signal_connect (full, "render-complete", G_CALLBACK (render_count_cb), &renders);
+  settle ();
+  g_assert_null (rich_region (source, 0));
+  g_assert_null (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
+  g_assert_false (webkit_settings_get_enable_javascript (webkit_web_view_get_settings (WEBKIT_WEB_VIEW (full))));
+  gint64 blank_deadline = g_get_monotonic_time () + 20 * G_TIME_SPAN_SECOND;
+  while (g_strcmp0 (webkit_web_view_get_uri (WEBKIT_WEB_VIEW (full)), "about:blank") != 0 &&
+         g_get_monotonic_time () < blank_deadline)
     {
-      g_autoptr (GtkEventController) controller = g_list_model_get_item (controllers, i);
-      if (GTK_IS_GESTURE_CLICK (controller)) g_signal_emit_by_name (controller, "released", 1, 0.0, 0.0);
+      while (g_main_context_iteration (NULL, FALSE));
+      g_usleep (1000);
     }
-  g_assert_nonnull (find_button (region, "Render"));
-  g_signal_emit_by_name (find_button (region, "Render"), "clicked");
-  settle ();
-  GtkWidget *button = find_button (region, "Source");
-  g_assert_nonnull (button);
-  g_signal_emit_by_name (button, "clicked");
-  settle ();
-  g_assert_nonnull (find_button (rich_region (source, 0), "Render"));
-  g_assert_false (gtk_widget_get_visible (find_widget (rich_region (source, 0), GTK_TYPE_PICTURE)));
+  g_assert_cmpstr (webkit_web_view_get_uri (WEBKIT_WEB_VIEW (full)), ==, "about:blank");
+  g_assert_false (gtk_text_buffer_get_has_selection (buffer));
   GtkTextIter iter;
-  guint offset = g_utf8_pointer_to_offset (markdown, strstr (markdown, "Héllo"));
-  gtk_text_buffer_get_iter_at_offset (buffer, &iter, offset);
+  gtk_text_buffer_get_start_iter (buffer, &iter);
   gtk_text_buffer_begin_user_action (buffer);
-  gtk_text_buffer_insert (buffer, &iter, "New ", -1);
+  gtk_text_buffer_insert (buffer, &iter, "Introduction\n\n", -1);
   gtk_text_buffer_end_user_action (buffer);
   settle ();
-  gtk_text_buffer_undo (buffer);
-  settle ();
-  g_autofree char *restored = marker_source_view_get_text (source);
-  g_assert_cmpstr (restored, ==, markdown);
-  button = find_button (rich_region (source, 0), "Render");
-  g_assert_nonnull (button);
-  g_signal_emit_by_name (button, "clicked");
-  wait_rich_pictures (source, 5);
-  settle ();
-  g_assert_true (gtk_widget_get_visible (find_widget (rich_region (source, 0), GTK_TYPE_PICTURE)));
-  GtkAdjustment *scroll = gtk_scrollable_get_vadjustment (GTK_SCROLLABLE (source));
-  gtk_adjustment_set_value (scroll, gtk_adjustment_get_upper (scroll) - gtk_adjustment_get_page_size (scroll));
-  settle ();
-  graphene_rect_t last_picture;
-  g_assert_true (gtk_widget_compute_bounds (find_widget (rich_region (source, 4), GTK_TYPE_PICTURE), GTK_WIDGET (source), &last_picture));
-  g_assert_cmpfloat (last_picture.origin.y, <, gtk_widget_get_height (GTK_WIDGET (source)));
-  g_assert_cmpfloat (last_picture.origin.y + last_picture.size.height, >, 0);
-  gtk_adjustment_set_value (scroll, 0);
+  gtk_window_set_default_size (GTK_WINDOW (window), 500, 800);
   marker_prefs_set_use_dark_theme (TRUE);
   marker_editor_apply_prefs (editor);
-  wait_rich_pictures (source, 5);
+  settle ();
+  gtk_text_buffer_undo (buffer);
+  marker_editor_refresh_preview (editor);
+  settle ();
+  g_assert_cmpuint (renders, ==, 0);
+  g_assert_null (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
+  g_assert_nonnull (find_button (GTK_WIDGET (editor), "Render"));
+  g_autofree char *restored = marker_source_view_get_text (source);
+  g_assert_cmpstr (restored, ==, markdown);
+  g_assert_false (marker_editor_has_unsaved_changes (editor));
+  AdwWindowTitle *title = ADW_WINDOW_TITLE (find_widget (GTK_WIDGET (window), ADW_TYPE_WINDOW_TITLE));
+  g_assert_cmpstr (adw_window_title_get_title (title), ==, "Rich elements");
+  /* Source stays selected across view-mode transitions, and resume renders once. */
+  marker_editor_set_view_mode (editor, EDITOR_ONLY_MODE);
+  marker_editor_set_view_mode (editor, FORMATTED_MODE);
+  settle ();
+  g_assert_null (rich_region (source, 0));
+  g_signal_handler_disconnect (full, handler);
+  gtk_window_set_default_size (GTK_WINDOW (window), 1200, 800);
+  g_signal_emit_by_name (find_button (GTK_WIDGET (editor), "Render"), "clicked");
+  wait_rich_pictures (source, 8);
   settle ();
   capture_window (window, "rich-dark");
+  /* Both math backends share inline/display/fenced regions and readiness. */
+  g_signal_emit_by_name (find_button (GTK_WIDGET (editor), "Source"), "clicked");
+  marker_prefs_set_math_backend (MATHJAX);
+  marker_editor_apply_prefs (editor);
+  g_assert_null (rich_region (source, 0));
+  g_signal_emit_by_name (find_button (GTK_WIDGET (editor), "Render"), "clicked");
+  wait_rich_pictures (source, 8);
+  renderer = MARKER_PREVIEW (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
+  assert_script (renderer, "document.querySelectorAll('mjx-container svg,.MathJax').length >= 3 && "
+    "!!document.querySelector('svg.charter') && !!document.querySelector('.mermaid svg')");
   gtk_window_set_default_size (GTK_WINDOW (window), 500, 800);
   settle ();
-  wait_rich_pictures (source, 5);
-  settle ();
-  g_assert_cmpint (gtk_widget_get_width (GTK_WIDGET (window)), <, 600);
+  wait_rich_pictures (source, 8);
   capture_window (window, "rich-narrow");
+  marker_prefs_set_math_backend (KATEX);
   marker_prefs_set_use_dark_theme (FALSE);
-  /* Selecting across hidden source exposes it without object replacement bytes. */
-  GtkTextIter start, end;
-  gtk_text_buffer_get_bounds (buffer, &start, &end);
-  gtk_text_buffer_select_range (buffer, &start, &end);
-  settle ();
-  for (guint i = 0; i < 5; i++)
-    g_assert_nonnull (find_button (rich_region (source, i), "Render"));
-  marker_editor_set_view_mode (editor, EDITOR_ONLY_MODE);
-  g_assert_null (rich_region (source, 0));
-  marker_editor_set_view_mode (editor, FORMATTED_MODE);
-  wait_rich_pictures (source, 5);
   g_assert_true (marker_editor_save_file (editor));
   g_autofree char *saved = NULL;
   g_assert_true (g_file_get_contents (path, &saved, NULL, NULL));
   g_assert_cmpstr (saved, ==, markdown);
-  /* Exercise pending render cancellation when switching mode/closing. */
+  /* Individual scientific preferences remain effective in page Render. */
+  const char *renderers[] = { "mathjs-toggle", "mermaid-toggle", "gnuplot-toggle", "charter-toggle" };
+  for (guint i = 0; i < G_N_ELEMENTS (renderers); i++)
+    g_settings_set_boolean (prefs.preview_settings, renderers[i], FALSE);
+  marker_editor_apply_prefs (editor);
+  renderer = MARKER_PREVIEW (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
+  assert_script (renderer, "!document.querySelector('.katex,mjx-container,.MathJax,svg.charter,.mermaid svg,.gnuplot-preview svg')");
+  gint64 deadline = g_get_monotonic_time () + 20 * G_TIME_SPAN_SECOND;
+  while (g_get_monotonic_time () < deadline)
+    {
+      while (g_main_context_iteration (NULL, FALSE));
+      GtkWidget *label = find_widget (rich_region (source, 5), GTK_TYPE_LABEL);
+      if (g_str_equal (gtk_label_get_text (GTK_LABEL (label)),
+                       "Renderer disabled or unavailable. Check Preview preferences.")) break;
+      g_usleep (1000);
+    }
+  for (guint i = 3; i <= 5; i++)
+    {
+      GtkWidget *region = rich_region (source, i);
+      g_assert_cmpstr (gtk_label_get_text (GTK_LABEL (find_widget (region, GTK_TYPE_LABEL))), ==,
+                      "Renderer disabled or unavailable. Check Preview preferences.");
+      g_assert_false (gtk_widget_get_visible (find_widget (region, GTK_TYPE_PICTURE)));
+    }
+  for (guint i = 0; i < G_N_ELEMENTS (renderers); i++)
+    g_settings_set_boolean (prefs.preview_settings, renderers[i], TRUE);
+  /* Cancel a newly started render through Source, then close without stale callbacks. */
   marker_editor_refresh_preview (editor);
-  marker_editor_set_view_mode (editor, EDITOR_ONLY_MODE);
+  g_signal_emit_by_name (find_button (GTK_WIDGET (editor), "Source"), "clicked");
+  settle ();
+  g_assert_null (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
   gtk_window_destroy (GTK_WINDOW (window));
   settle ();
   g_remove (path);
@@ -668,14 +874,12 @@ test_rich_failures_refresh (void)
   do
     {
       settle ();
-      if (rich_region (source, 1) != NULL && find_button (rich_region (source, 0), "Render") != NULL &&
-          find_button (rich_region (source, 1), "Render") != NULL &&
-          rich_region (source, 3) != NULL &&
+      if (rich_region (source, 3) != NULL &&
+          !gtk_widget_get_visible (find_widget (rich_region (source, 0), GTK_TYPE_PICTURE)) &&
+          !gtk_widget_get_visible (find_widget (rich_region (source, 1), GTK_TYPE_PICTURE)) &&
           gtk_picture_get_paintable (GTK_PICTURE (find_widget (rich_region (source, 2), GTK_TYPE_PICTURE))) != NULL &&
           gtk_picture_get_paintable (GTK_PICTURE (find_widget (rich_region (source, 3), GTK_TYPE_PICTURE))) != NULL) break;
     } while (g_get_monotonic_time () < deadline);
-  g_assert_nonnull (find_button (rich_region (source, 0), "Render"));
-  g_assert_nonnull (find_button (rich_region (source, 1), "Render"));
   for (guint i = 0; i < 2; i++)
     g_assert_false (gtk_widget_get_visible (find_widget (rich_region (source, i), GTK_TYPE_PICTURE)));
   for (guint i = 2; i < 4; i++)
@@ -683,8 +887,7 @@ test_rich_failures_refresh (void)
   g_assert_false (marker_editor_has_unsaved_changes (editor));
   /* Recover each failed region without losing source or changing other blocks. */
   g_file_set_contents (image, "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='60'><rect width='120' height='60' fill='#3584e4'/></svg>", -1, NULL);
-  GtkWidget *button = find_button (rich_region (source, 0), "Render");
-  g_signal_emit_by_name (button, "clicked");
+  g_signal_emit_by_name (find_button (GTK_WIDGET (editor), "Source"), "clicked");
   settle ();
   GtkTextBuffer *buffer = GTK_TEXT_BUFFER (marker_editor_get_buffer (editor));
   GtkTextIter start, end;
@@ -696,6 +899,7 @@ test_rich_failures_refresh (void)
   gtk_text_buffer_insert (buffer, &start, "plot cos(x)", -1);
   gtk_text_buffer_end_user_action (buffer);
   settle ();
+  g_signal_emit_by_name (find_button (GTK_WIDGET (editor), "Render"), "clicked");
   wait_rich_pictures (source, 4);
   MarkerPreview *renderer = MARKER_PREVIEW (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
   assert_script (renderer, "document.querySelector('.marker-math-block .katex') !== null && "
@@ -718,6 +922,9 @@ test_rich_failures_refresh (void)
   g_autofree char *after_refresh = marker_source_view_get_text (source);
   g_assert_cmpstr (after_refresh, ==, edited);
   g_assert_true (marker_editor_save_file (editor));
+  /* Export renders explicitly without resuming a paused writing page. */
+  g_signal_emit_by_name (find_button (GTK_WIDGET (editor), "Source"), "clicked");
+  settle ();
   g_autofree char *html_path = g_build_filename (fixture, "rich-inline.html", NULL);
   g_autofree char *pdf_path = g_build_filename (fixture, "rich-inline.pdf", NULL);
   g_assert_true (marker_exporter_export (path, html_path));
@@ -731,6 +938,18 @@ test_rich_failures_refresh (void)
   g_autofree char *pdf = NULL;
   g_file_get_contents (pdf_path, &pdf, NULL, NULL);
   g_assert_true (g_str_has_prefix (pdf, "%PDF-"));
+  g_assert_null (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
+  g_assert_nonnull (find_button (GTK_WIDGET (editor), "Render"));
+  g_file_set_contents (data, "0,5\n1,4\n2,6\n", -1, NULL);
+  g_file_set_contents (style, "body { color: rgb(34, 56, 78); }", -1, NULL);
+  settle ();
+  g_assert_null (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
+  g_assert_nonnull (find_button (GTK_WIDGET (editor), "Render"));
+  g_signal_emit_by_name (find_button (GTK_WIDGET (editor), "Render"), "clicked");
+  wait_rich_pictures (source, 4);
+  renderer = MARKER_PREVIEW (find_widget (GTK_WIDGET (source), MARKER_TYPE_PREVIEW));
+  assert_script (renderer, "getComputedStyle(document.body).color === 'rgb(34, 56, 78)' && "
+    "document.querySelectorAll('.gnuplot-preview svg').length === 2");
   gtk_window_destroy (GTK_WINDOW (window));
   settle ();
   /* Unsaved notebook pages resolve assets against their notebook root. */
@@ -805,14 +1024,24 @@ test_notebook_styles (void)
   g_assert_cmpstr (gtk_source_language_get_id (gtk_source_buffer_get_language (marker_editor_get_buffer (css_editor))), ==, "css");
   g_file_delete (renamed, NULL, NULL);
   settle ();
+  marker_editor_set_view_mode (editor, PREVIEW_ONLY_MODE);
   MarkerPreview *preview = marker_editor_get_preview (editor);
   assert_script (preview, "getComputedStyle(document.body).color === 'rgb(18, 52, 86)' && "
     "getComputedStyle(document.body).fontFamily === 'monospace' && "
     "getComputedStyle(document.body).maxWidth === '680px' && "
     "getComputedStyle(document.body).backgroundImage.includes('/data/paper.svg') && "
     "document.querySelectorAll('#cursor_pos').length === 1");
+  guint renders = 0;
+  gulong handler = g_signal_connect (preview, "render-complete", G_CALLBACK (render_count_cb), &renders);
   g_file_set_contents (style, "body { color: #654321; }", -1, NULL); /* Atomic replacement. */
-  settle ();
+  gint64 deadline = g_get_monotonic_time () + 20 * G_TIME_SPAN_SECOND;
+  while (renders == 0 && g_get_monotonic_time () < deadline)
+    {
+      while (g_main_context_iteration (NULL, FALSE));
+      g_usleep (1000);
+    }
+  g_assert_cmpuint (renders, >, 0);
+  g_signal_handler_disconnect (preview, handler);
   assert_script (preview, "getComputedStyle(document.body).color === 'rgb(101, 67, 33)'");
   g_autofree char *outfile = g_build_filename (fixture, "export.html", NULL);
   g_autofree char *infile = g_file_get_path (file);
@@ -882,6 +1111,7 @@ test_preview_preferences (void)
   marker_window_new_editor_from_file (window, file);
   MarkerEditor *editor = marker_window_get_active_editor (window);
   MarkerPreview *preview = marker_editor_get_preview (editor);
+  marker_editor_set_view_mode (editor, PREVIEW_ONLY_MODE);
   marker_source_view_set_text (marker_editor_get_source_view (editor),
     "---\nstyle: document.css\n---\n# Heading\n\nText with $x^2$.\n\n"
     "```python\nx = 2\n```\n\n```mermaid\ngraph TD; A-->B;\n```\n", -1);
@@ -999,6 +1229,7 @@ test_scientific_export (void)
   marker_window_new_editor_from_file (window, file);
   MarkerEditor *editor = marker_window_get_active_editor (window);
   MarkerPreview *preview = marker_editor_get_preview (editor);
+  marker_editor_set_view_mode (editor, PREVIEW_ONLY_MODE);
   /* Supersede a render while its worker is starting. Only the new one may complete. */
   marker_editor_refresh_preview (editor);
   marker_editor_jump_to_heading (editor, 18);
@@ -1044,6 +1275,16 @@ capture_window (MarkerWindow *window, const char *name)
 }
 
 static void
+assert_window_color_scheme (MarkerWindow *window)
+{
+  GdkRGBA background;
+  g_assert_true (gtk_style_context_lookup_color (gtk_widget_get_style_context (GTK_WIDGET (window)),
+                                                "window_bg_color", &background));
+  gboolean dark = (background.red + background.green + background.blue) / 3.0 < .5;
+  g_assert_cmpint (dark, ==, adw_style_manager_get_dark (adw_style_manager_get_default ()));
+}
+
+static void
 test_visual_matrix (void)
 {
   g_autofree char *style_path = g_build_filename (fixture, ".marker.css", NULL);
@@ -1079,6 +1320,7 @@ test_visual_matrix (void)
         {
           gtk_window_set_default_size (GTK_WINDOW (window), widths[i], 800);
           settle ();
+          assert_window_color_scheme (window);
           g_autofree char *name = g_strdup_printf ("%s-%s", dark ? "dark" : "light", sizes[i]);
           capture_window (window, name);
           if (i > 0)
@@ -1106,6 +1348,9 @@ test_visual_matrix (void)
   capture_window (window, "dark-preferences");
   adw_dialog_close (preferences);
   settle ();
+  g_settings_set_boolean (prefs.window_settings, "follow-system-theme", TRUE);
+  settle ();
+  assert_window_color_scheme (window);
   gtk_window_destroy (GTK_WINDOW (window));
   settle ();
   marker_prefs_set_use_dark_theme (FALSE);
@@ -1158,7 +1403,9 @@ main (int argc, char **argv)
   g_test_add_func ("/window/pages-files-search", test_page_files_search);
   g_test_add_func ("/window/default-typography", test_default_typography);
   g_test_add_func ("/window/document-surface", test_document_surface);
+  g_test_add_func ("/window/spell-check", test_spell_check);
   g_test_add_func ("/window/rich-editing", test_rich_editing);
+  g_test_add_func ("/window/rich-pointer", test_rich_pointer);
   g_test_add_func ("/window/rich-failures-refresh", test_rich_failures_refresh);
   g_test_add_func ("/window/notebook-styles", test_notebook_styles);
   g_test_add_func ("/window/preview-preferences", test_preview_preferences);

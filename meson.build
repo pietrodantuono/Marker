@@ -93,12 +93,12 @@ add_global_arguments(
 
 glib_dep = dependency('glib-2.0')
 gio_dep = dependency('gio-2.0')
-gtk_dep = dependency('gtk4', version : '>=4.18')
-adw_dep = dependency('libadwaita-1', version : '>=1.7')
+gtk_dep = dependency('gtk4', version : '>=4.14')
+adw_dep = dependency('libadwaita-1', version : '>=1.5')
 webkit_dep = dependency('webkitgtk-6.0', version : '>=2.50')
 spelling_dep = dependency(
   'libspelling-1',
-  version : '>=0.4.10',
+  version : '>=0.2.0',
   fallback : ['libspelling', 'libspelling_dep']
 )
 
@@ -107,7 +107,7 @@ deps = [
   adw_dep,
   glib_dep,
   gio_dep,
-  dependency('gtksourceview-5', version : '>=5.14'),
+  dependency('gtksourceview-5', version : '>=5.12'),
   webkit_dep,
   dependency('libsoup-3.0'),
   spelling_dep
@@ -181,17 +181,28 @@ notebook_test = executable(
 )
 test('notebook GTK widgets', notebook_test, env : test_env)
 
+# Native pointer regression is optional and never adds application dependencies.
+pointer_deps = [dependency('gtk4-x11', required : false),
+                dependency('x11', required : false), dependency('xtst', required : false)]
+ui_deps = deps
+ui_args = []
+if pointer_deps[0].found() and pointer_deps[1].found() and pointer_deps[2].found()
+  ui_deps += pointer_deps
+  ui_args += '-DHAVE_XTEST'
+endif
+
 ui_test = executable(
   'marker-ui-test',
   sources : ['test/marker-ui-test.c', marker_sources, hoedown_sources],
   include_directories : include_directories('src'),
-  dependencies : deps,
+  dependencies : ui_deps,
+  c_args : ui_args,
   link_args : '-lm'
 )
 ui_env = test_env
 ui_env.set('GSETTINGS_BACKEND', 'memory')
 ui_env.set('GTK_A11Y', 'none')
-test('window workflows', ui_test, env : ui_env, timeout : 60)
+test('window workflows', ui_test, env : ui_env, timeout : 90)
 
 install_data(
   'data/com.github.fabiocolacio.marker.svg',

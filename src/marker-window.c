@@ -821,8 +821,7 @@ action_print (GSimpleAction *action,
 {
   MarkerEditor *editor = marker_window_get_active_editor (MARKER_WINDOW (user_data));
   if (editor != NULL)
-    marker_preview_run_print_dialog (marker_editor_get_preview (editor),
-                                     GTK_WINDOW (user_data));
+    marker_editor_print (editor, GTK_WINDOW (user_data));
 }
 
 static void
@@ -1165,6 +1164,9 @@ create_header_bar (MarkerWindow *self)
   adw_header_bar_set_title_widget (bar, GTK_WIDGET (self->title));
   gtk_widget_add_css_class (GTK_WIDGET (bar), "marker-topbar");
   gtk_button_set_icon_name (GTK_BUTTON (outline), "view-list-symbolic");
+  gtk_widget_add_css_class (outline, "flat");
+  gtk_widget_add_css_class (self->view_button, "flat");
+  gtk_widget_add_css_class (overflow, "flat");
   gtk_actionable_set_action_name (GTK_ACTIONABLE (outline), "win.outline");
   gtk_widget_set_tooltip_text (outline, _("Outline"));
   gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (self->view_button), "view-grid-symbolic");
@@ -1393,6 +1395,8 @@ marker_window_init (MarkerWindow *self)
 {
   MarkerViewMode default_mode;
   g_autofree char *sort = NULL;
+  /* Breakpoint layouts do not compute a minimum from their collapsed children. */
+  gtk_widget_set_size_request (GTK_WIDGET (self), 360, 360);
   self->projects = g_list_store_new (MARKER_TYPE_PROJECT);
   self->documents = g_list_store_new (MARKER_TYPE_EDITOR);
   self->pages_visible = marker_prefs_get_show_sidebar ();

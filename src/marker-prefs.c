@@ -16,6 +16,7 @@ MarkerPrefs prefs;
 
 static GSettings *desktop_settings;
 static AdwDialog *preferences_dialog;
+static GtkCssProvider *zorin_theme_provider;
 
 static gboolean
 has_existing_profile (void)
@@ -62,6 +63,50 @@ has_existing_profile (void)
 }
 
 static void
+apply_zorin_theme (AdwStyleManager *manager)
+{
+  g_autofree char *theme_path = NULL;
+  gboolean zorin_theme = FALSE;
+
+  /* Zorin's theme-path loader imports widget rules as well as colors. Keep
+   * Libadwaita's widget styling and effective scheme instead of importing another
+   * full GTK theme. Other themes and high contrast retain their native styling. */
+  if (g_object_class_find_property (G_OBJECT_GET_CLASS (manager), "theme-path") != NULL &&
+      !adw_style_manager_get_high_contrast (manager))
+    {
+      g_object_get (manager, "theme-path", &theme_path, NULL);
+      if (theme_path != NULL)
+        {
+          g_autofree char *directory = g_path_get_dirname (theme_path);
+          g_autofree char *theme = g_path_get_basename (directory);
+          zorin_theme = g_str_has_prefix (theme, "Zorin") &&
+            (g_str_has_suffix (theme, "-Dark") || g_str_has_suffix (theme, "-Light"));
+        }
+    }
+
+  if (zorin_theme)
+    {
+      if (zorin_theme_provider == NULL)
+        {
+          zorin_theme_provider = gtk_css_provider_new ();
+          gtk_style_context_add_provider_for_display (gdk_display_get_default (),
+            GTK_STYLE_PROVIDER (zorin_theme_provider), GTK_STYLE_PROVIDER_PRIORITY_THEME + 1);
+        }
+      g_autofree char *stylesheet = g_strdup_printf (
+        "@import url('resource:///org/gnome/Adwaita/styles/base.css');"
+        "@import url('resource:///org/gnome/Adwaita/styles/defaults-%s.css');",
+        adw_style_manager_get_dark (manager) ? "dark" : "light");
+      gtk_css_provider_load_from_string (zorin_theme_provider, stylesheet);
+    }
+  else if (zorin_theme_provider != NULL)
+    {
+      gtk_style_context_remove_provider_for_display (gdk_display_get_default (),
+                                                     GTK_STYLE_PROVIDER (zorin_theme_provider));
+      g_clear_object (&zorin_theme_provider);
+    }
+}
+
+static void
 apply_color_scheme (void)
 {
   AdwStyleManager *manager = adw_style_manager_get_default ();
@@ -72,6 +117,7 @@ apply_color_scheme (void)
     adw_style_manager_set_color_scheme (manager, ADW_COLOR_SCHEME_FORCE_DARK);
   else
     adw_style_manager_set_color_scheme (manager, ADW_COLOR_SCHEME_FORCE_LIGHT);
+  apply_zorin_theme (manager);
 }
 
 gboolean
@@ -263,6 +309,7 @@ system_theme_changed_cb (AdwStyleManager *manager,
                          GParamSpec      *pspec,
                          gpointer         user_data)
 {
+  apply_zorin_theme (manager);
   if (marker_prefs_get_follow_system_theme ())
     preference_changed_cb (prefs.window_settings, "follow-system-theme", NULL);
 }
@@ -298,6 +345,11 @@ marker_prefs_load (void)
                     G_CALLBACK (preference_changed_cb), NULL);
   g_signal_connect (adw_style_manager_get_default (), "notify::dark",
                     G_CALLBACK (system_theme_changed_cb), NULL);
+  g_signal_connect (adw_style_manager_get_default (), "notify::high-contrast",
+                    G_CALLBACK (system_theme_changed_cb), NULL);
+  if (g_object_class_find_property (G_OBJECT_GET_CLASS (adw_style_manager_get_default ()), "theme-path") != NULL)
+    g_signal_connect (adw_style_manager_get_default (), "notify::theme-path",
+                      G_CALLBACK (system_theme_changed_cb), NULL);
   apply_color_scheme ();
 }
 
@@ -620,6 +672,7 @@ marker_prefs_show_window (void)
   add_switch (group, prefs.preview_settings, "highlight-toggle", "Highlight code", NULL);
   add_switch (group, prefs.preview_settings, "mermaid-toggle", "Enable Mermaid", NULL);
   add_switch (group, prefs.preview_settings, "gnuplot-toggle", "Enable gnuplot", "Render gnuplot fenced blocks and linked data files");
+  add_switch (group, prefs.preview_settings, "charter-toggle", "Enable Charter", "Render Charter fenced plots");
   group = add_group (preview_page, "Font overrides");
   add_preview_font_override (group, "header", "Headings", FALSE);
   add_preview_font_override (group, "math", "Mathematics", FALSE);

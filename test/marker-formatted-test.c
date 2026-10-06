@@ -150,13 +150,14 @@ test_rich_regions (void)
     "Inline $x^2$ and `![literal](x)`\n\n"
     "| A | B |\n| --- | ---: |\n| 1 | 2 |\n\n"
     "```gnuplot\nplot sin(x)\n```\n\n"
+    "```charter\nplot\n```\n\n"
     "```c\n![hidden](x) $literal$\n```\n\n"
     "- Nested ![asset](x)\n\n"
     "`$literal$`\n\n"
     "Final ![ref][figure]\n\n[figure]: data/chart.svg\n";
   g_autoptr (MarkerMarkdownStructure) structure = marker_markdown_structure_parse (markdown);
   g_autoptr (GArray) ranges = marker_markdown_structure_rich_ranges (markdown, structure);
-  g_assert_cmpuint (ranges->len, ==, 5);
+  g_assert_cmpuint (ranges->len, ==, 6);
   guint previous = 0;
   for (guint i = 0; i < ranges->len; i++)
     {

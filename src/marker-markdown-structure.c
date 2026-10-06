@@ -44,7 +44,7 @@ is_science (const char *start, const char *end)
   while (word_end < end && !g_ascii_isspace (*word_end))
     word_end++;
   g_autofree char *word = g_ascii_strdown (start, word_end - start);
-  return g_str_equal (word, "mermaid") || g_str_equal (word, "gnuplot") ||
+  return g_str_equal (word, "mermaid") || g_str_equal (word, "gnuplot") || g_str_equal (word, "charter") ||
          g_str_equal (word, "math") || g_str_equal (word, "tex") || g_str_equal (word, "latex");
 }
 

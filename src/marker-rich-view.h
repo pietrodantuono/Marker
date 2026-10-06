@@ -9,6 +9,5 @@ MarkerRichView *marker_rich_view_new (MarkerSourceView *source);
 void marker_rich_view_set_enabled (MarkerRichView *self, gboolean enabled);
 void marker_rich_view_refresh (MarkerRichView *self, const char *theme,
                                const char *document_path, const char *notebook_folder);
-gboolean marker_rich_view_toggle_at_cursor (MarkerRichView *self);
 G_END_DECLS
 #endif

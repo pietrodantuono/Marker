@@ -23,6 +23,8 @@ struct _MarkerEditor
   GtkWidget *source_scroller;
   GtkWidget *content;
   GtkWidget *format_bar;
+  GtkButton *render_button;
+  gboolean render_inline;
   GtkSearchBar *search_bar;
   GtkSearchEntry *search_entry;
   GtkWidget *preview_window;
@@ -51,6 +53,18 @@ enum
 static guint editor_signals[LAST_SIGNAL];
 
 static void marker_editor_update_layout (MarkerEditor *self);
+static void refresh_preview (MarkerEditor *self, gboolean force_preview);
+
+static void
+sync_inline_mode (MarkerEditor *self)
+{
+  gboolean rendering = self->view_mode == FORMATTED_MODE && self->render_inline;
+  marker_rich_view_set_enabled (self->rich_view, rendering);
+  marker_source_view_set_formatted (self->source_view, rendering);
+  gtk_button_set_label (self->render_button, self->render_inline ? _("Source") : _("Render"));
+  gtk_widget_set_tooltip_text (GTK_WIDGET (self->render_button), self->render_inline
+    ? _("Show page source and pause inline rendering") : _("Render page elements"));
+}
 
 static void
 detach_widget (GtkWidget *widget)
@@ -107,7 +121,6 @@ buffer_changed_cb (GtkTextBuffer *buffer,
 
 static void
 buffer_modified_cb (GtkTextBuffer *buffer,
-                    GParamSpec    *pspec,
                     MarkerEditor  *self)
 {
   g_signal_emit (self, editor_signals[TITLE_CHANGED], 0);
@@ -297,14 +310,19 @@ append_insert_format (GtkBox *box, MarkerEditor *self, const char *label, const 
 }
 
 static void
-preview_source_block_cb (GtkButton    *button,
-                         MarkerEditor *self)
+toggle_page_render_cb (GtkButton    *button,
+                       MarkerEditor *self)
 {
-  if (!marker_rich_view_toggle_at_cursor (self->rich_view))
-    {
-      marker_editor_set_view_mode (self, DUAL_PANE_MODE);
-      marker_editor_scroll_preview_to_cursor (self);
-    }
+  self->render_inline = !self->render_inline;
+  sync_inline_mode (self);
+  marker_editor_refresh_preview (self);
+}
+
+static void
+source_requested_cb (MarkerRichView *rich, MarkerEditor *self)
+{
+  if (self->render_inline) toggle_page_render_cb (self->render_button, self);
+  gtk_widget_grab_focus (GTK_WIDGET (self->source_view));
 }
 
 static GtkWidget *
@@ -350,13 +368,16 @@ create_format_bar (MarkerEditor *self)
   append_snippet_button (GTK_BOX (insert_box), self, "Horizontal rule", "\n---\n", 0);
   gtk_popover_set_child (GTK_POPOVER (insert_popover), insert_box);
   gtk_menu_button_set_popover (GTK_MENU_BUTTON (insert_menu), insert_popover);
+  gtk_widget_add_css_class (insert_menu, "flat");
   gtk_box_append (GTK_BOX (bar), insert_menu);
 
   gtk_widget_set_hexpand (spacer, TRUE);
   gtk_box_append (GTK_BOX (bar), spacer);
-  preview_button = icon_button ("view-reveal-symbolic", "Render / Source at the cursor");
+  preview_button = gtk_button_new_with_label (_("Source"));
+  gtk_widget_add_css_class (preview_button, "flat");
+  self->render_button = GTK_BUTTON (preview_button);
   gtk_widget_add_css_class (preview_button, "marker-preview-action");
-  g_signal_connect (preview_button, "clicked", G_CALLBACK (preview_source_block_cb), self);
+  g_signal_connect (preview_button, "clicked", G_CALLBACK (toggle_page_render_cb), self);
   gtk_box_append (GTK_BOX (bar), preview_button);
   return bar;
 }
@@ -419,8 +440,7 @@ marker_editor_update_layout (MarkerEditor *self)
       self->preview_window = NULL;
     }
 
-  marker_source_view_set_formatted (self->source_view, self->view_mode == FORMATTED_MODE);
-  marker_rich_view_set_enabled (self->rich_view, self->view_mode == FORMATTED_MODE);
+  sync_inline_mode (self);
   gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (self->source_view),
     self->view_mode == FORMATTED_MODE || marker_prefs_get_wrap_text () ? GTK_WRAP_WORD_CHAR : GTK_WRAP_NONE);
   gtk_widget_set_visible (self->format_bar,
@@ -515,10 +535,10 @@ marker_editor_init (MarkerEditor *self)
   gtk_orientable_set_orientation (GTK_ORIENTABLE (self), GTK_ORIENTATION_VERTICAL);
   self->view_mode = marker_prefs_get_default_view_mode ();
   self->source_view = marker_source_view_new ();
-  self->rich_view = marker_rich_view_new (self->source_view);
   self->preview = g_object_ref_sink (marker_preview_new ());
   self->source_scroller = g_object_ref_sink (gtk_scrolled_window_new ());
   self->content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+  self->render_inline = TRUE;
   self->format_bar = create_format_bar (self);
 
   gtk_widget_add_css_class (self->content, "marker-editor-surface");
@@ -528,6 +548,8 @@ marker_editor_init (MarkerEditor *self)
                                  GTK_WIDGET (self->source_view));
   gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (self->source_scroller),
                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+  self->rich_view = marker_rich_view_new (self->source_view);
+  g_signal_connect_object (self->rich_view, "source-requested", G_CALLBACK (source_requested_cb), self, 0);
   gtk_box_append (GTK_BOX (self), create_search_bar (self));
   gtk_box_append (GTK_BOX (self), self->content);
   gtk_box_append (GTK_BOX (self), self->format_bar);
@@ -535,7 +557,7 @@ marker_editor_init (MarkerEditor *self)
 
   buffer = gtk_text_view_get_buffer (GTK_TEXT_VIEW (self->source_view));
   g_signal_connect_object (buffer, "changed", G_CALLBACK (buffer_changed_cb), self, 0);
-  g_signal_connect_object (buffer, "notify::modified", G_CALLBACK (buffer_modified_cb), self, 0);
+  g_signal_connect_object (buffer, "modified-changed", G_CALLBACK (buffer_modified_cb), self, 0);
   g_signal_connect_swapped (self->preview, "gnuplot-data-changed",
                             G_CALLBACK (queue_preview_refresh), self);
   g_signal_connect_object (self->source_view, "cursor-changed", G_CALLBACK (sync_heading_chooser), self, 0);
@@ -557,9 +579,10 @@ marker_editor_new_from_file (GFile *file)
   return self;
 }
 
-void
-marker_editor_refresh_preview (MarkerEditor *self)
+static void
+refresh_preview (MarkerEditor *self, gboolean force_preview)
 {
+  g_clear_handle_id (&self->refresh_source, g_source_remove);
   g_autofree char *markdown = marker_source_view_get_text (self->source_view);
   g_autofree char *theme = marker_prefs_get_css_theme ();
   g_autofree char *stylesheet = NULL;
@@ -568,9 +591,27 @@ marker_editor_refresh_preview (MarkerEditor *self)
   if (marker_prefs_get_use_css_theme () && theme != NULL && *theme != '\0')
     stylesheet = g_path_is_absolute (theme) ? g_strdup (theme) : g_build_filename (STYLES_DIR, theme, NULL);
   g_autofree char *notebook = self->project != NULL ? g_file_get_path (marker_project_get_root (self->project)) : NULL;
-  marker_preview_render_markdown (self->preview, markdown, stylesheet, path, notebook,
-                                  marker_source_view_get_cursor_position (self->source_view));
-  marker_rich_view_refresh (self->rich_view, stylesheet, path, notebook);
+  if (force_preview || self->view_mode != FORMATTED_MODE)
+    marker_preview_render_markdown (self->preview, markdown, stylesheet, path, notebook,
+                                    marker_source_view_get_cursor_position (self->source_view));
+  else
+    marker_preview_pause (self->preview);
+  if (!force_preview) marker_rich_view_refresh (self->rich_view, stylesheet, path, notebook);
+}
+
+void
+marker_editor_refresh_preview (MarkerEditor *self)
+{
+  refresh_preview (self, FALSE);
+}
+
+void
+marker_editor_print (MarkerEditor *self, GtkWindow *parent)
+{
+  g_autoptr (MarkerEditor) hold = g_object_ref (self);
+  refresh_preview (self, TRUE);
+  marker_preview_run_print_dialog (self->preview, parent);
+  if (self->view_mode == FORMATTED_MODE) marker_preview_pause (self->preview);
 }
 
 MarkerViewMode

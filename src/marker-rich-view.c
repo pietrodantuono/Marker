@@ -70,7 +70,7 @@ typedef struct
   MarkerRichView *owner;
   GtkTextMark *start, *end;
   GtkTextTag *spacing;
-  GtkWidget *box, *picture, *button, *message;
+  GtkWidget *box, *picture, *message;
   gboolean source;
 } RichItem;
 
@@ -146,20 +146,20 @@ apply_item (RichItem *item)
   gtk_text_iter_forward_char (&first_end);
   gtk_text_buffer_remove_tag (buffer, self->hidden, &start, &end);
   gboolean has_picture = gtk_picture_get_paintable (GTK_PICTURE (item->picture)) != NULL;
-  if (item->source)
+  gboolean source = item->source;
+  if (source)
     {
       GtkTextTag *delimiters = gtk_text_tag_table_lookup (gtk_text_buffer_get_tag_table (buffer), "marker-delimiter-hidden");
       if (delimiters != NULL) gtk_text_buffer_remove_tag (buffer, delimiters, &start, &end);
     }
-  gtk_widget_set_visible (item->picture, !item->source && has_picture);
-  gtk_button_set_label (GTK_BUTTON (item->button), item->source ? _("Render") : _("Source"));
+  gtk_widget_set_visible (item->picture, !source && has_picture);
   gtk_widget_set_size_request (item->box, self->width, -1);
   GtkRequisition size;
   gtk_widget_get_preferred_size (item->box, &size, NULL);
-  int space = MAX (36, size.height);
+  int space = size.height;
   g_object_set (item->spacing, "pixels-above-lines", space, NULL);
   gtk_text_buffer_apply_tag (buffer, item->spacing, &start, &first_end);
-  if (!item->source && has_picture)
+  if (!source && has_picture)
     gtk_text_buffer_apply_tag (buffer, self->hidden, &start, &end);
   gtk_widget_set_visible (item->box, TRUE);
   queue_layout (self);
@@ -180,49 +180,26 @@ show_error (MarkerRichView *self, const char *message)
 }
 
 static void
-show_source (RichItem *item, gboolean focus)
+show_source (RichItem *item)
 {
   MarkerRichView *self = item->owner;
   self->applying = TRUE;
   item->source = TRUE;
   apply_item (item);
-  if (focus)
-    {
-      GtkTextIter start, end;
-      item_bounds (item, &start, &end);
-      gtk_text_buffer_place_cursor (source_buffer (self), &start);
-      gtk_text_view_scroll_to_iter (GTK_TEXT_VIEW (self->source), &start, .1, FALSE, 0, 0);
-      gtk_widget_grab_focus (GTK_WIDGET (self->source));
-    }
   self->applying = FALSE;
 }
 
 static void
-toggle_item (GtkButton *button, RichItem *item)
+claim_press (GtkGestureClick *gesture, int count, double x, double y, gpointer data)
 {
-  g_autoptr (GtkButton) hold_button = g_object_ref (button);
-  if (!item->source)
-    { show_source (item, TRUE); return; }
-  MarkerRichView *self = item->owner;
-  self->applying = TRUE;
-  GtkTextIter start, end;
-  item_bounds (item, &start, &end);
-  if (!gtk_text_iter_forward_char (&end))
-    gtk_text_iter_backward_char (&start);
-  else
-    start = end;
-  gtk_text_buffer_place_cursor (source_buffer (self), &start);
-  item->source = FALSE;
-  apply_item (item);
-  self->applying = FALSE;
-  if (self->dirty || gtk_picture_get_paintable (GTK_PICTURE (item->picture)) == NULL)
-    rebuild (self);
+  /* Keep the ancestor text view from selecting beneath a rendered element. */
+  gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
 static void
 picture_clicked (GtkGestureClick *gesture, int count, double x, double y, RichItem *item)
 {
-  show_source (item, TRUE);
+  g_signal_emit_by_name (item->owner, "source-requested");
 }
 
 static RenderRequest *
@@ -422,6 +399,18 @@ queue_layout (MarkerRichView *self)
 }
 
 static void
+scroll_changed (MarkerRichView *self)
+{
+  /* GTK 4.14 redraws unanchored text overlays on scroll without reallocating
+   * them. Refresh the view allocation so its overlay coordinates also move. */
+  if (self->enabled && !self->disposed)
+    {
+      gtk_text_view_move_overlay (GTK_TEXT_VIEW (self->source), self->layer, 0, 0);
+      gtk_widget_queue_allocate (GTK_WIDGET (self->source));
+    }
+}
+
+static void
 cursor_changed (MarkerSourceView *source, MarkerRichView *self)
 {
   if (!self->enabled || self->applying) return;
@@ -450,7 +439,7 @@ cursor_changed (MarkerSourceView *source, MarkerRichView *self)
       item_bounds (item, &start, &end);
       if (gtk_text_iter_compare (&selection_start, &end) <= 0 &&
           gtk_text_iter_compare (&selection_end, &start) >= 0)
-        show_source (item, FALSE);
+        show_source (item);
     }
   queue_layout (self);
 }
@@ -473,7 +462,7 @@ buffer_changed (GtkTextBuffer *buffer, MarkerRichView *self)
   invalidate (self);
   /* Reveal immediately: old textures must never conceal newly inserted text. */
   for (guint i = 0; i < self->items->len; i++)
-    show_source (g_ptr_array_index (self->items, i), FALSE);
+    show_source (g_ptr_array_index (self->items, i));
 }
 
 static gboolean
@@ -512,7 +501,7 @@ rebuild (MarkerRichView *self)
       self->dirty = FALSE;
       if (self->renderer != NULL)
         {
-          webkit_web_view_stop_loading (WEBKIT_WEB_VIEW (self->renderer));
+          marker_preview_pause (self->renderer);
           gtk_widget_set_visible (GTK_WIDGET (self->renderer), FALSE);
         }
       return;
@@ -539,14 +528,9 @@ rebuild (MarkerRichView *self)
       gtk_text_buffer_get_iter_at_offset (buffer, &end, range->end);
       item->start = gtk_text_buffer_create_mark (buffer, NULL, &start, TRUE);
       item->end = gtk_text_buffer_create_mark (buffer, NULL, &end, FALSE);
-      item->spacing = gtk_text_buffer_create_tag (buffer, NULL, "pixels-above-lines", 36, NULL);
+      item->spacing = gtk_text_buffer_create_tag (buffer, NULL, "pixels-above-lines", 0, NULL);
       item->box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
       gtk_widget_add_css_class (item->box, "marker-rich-region");
-      item->button = gtk_button_new_with_label (_("Source"));
-      gtk_widget_add_css_class (item->button, "flat");
-      gtk_widget_set_halign (item->button, GTK_ALIGN_END);
-      gtk_widget_set_tooltip_text (item->button, _("Switch between rendered content and Markdown source"));
-      gtk_box_append (GTK_BOX (item->box), item->button);
       item->message = gtk_label_new (NULL);
       gtk_label_set_text (GTK_LABEL (item->message), _("Rendering…"));
       gtk_label_set_wrap (GTK_LABEL (item->message), TRUE);
@@ -560,8 +544,8 @@ rebuild (MarkerRichView *self)
       gtk_box_append (GTK_BOX (item->box), item->picture);
       GtkGesture *click = gtk_gesture_click_new ();
       gtk_widget_add_controller (item->picture, GTK_EVENT_CONTROLLER (click));
+      g_signal_connect (click, "pressed", G_CALLBACK (claim_press), NULL);
       g_signal_connect (click, "released", G_CALLBACK (picture_clicked), item);
-      g_signal_connect (item->button, "clicked", G_CALLBACK (toggle_item), item);
       gtk_widget_set_parent (item->box, self->layer);
       g_ptr_array_add (self->items, item);
       apply_item (item);
@@ -588,25 +572,18 @@ marker_rich_view_set_enabled (MarkerRichView *self, gboolean enabled)
   self->enabled = enabled;
   self->last_cursor = self->last_selection = marker_source_view_get_cursor_position (self->source);
   invalidate (self);
-  if (self->renderer != NULL)
-    gtk_widget_set_visible (GTK_WIDGET (self->renderer), enabled);
   if (enabled) queue_layout (self);
-  else clear_items (self);
-}
-
-gboolean
-marker_rich_view_toggle_at_cursor (MarkerRichView *self)
-{
-  int offset = marker_source_view_get_cursor_position (self->source);
-  for (guint i = 0; i < self->items->len; i++)
+  else
     {
-      RichItem *item = g_ptr_array_index (self->items, i);
-      GtkTextIter start, end;
-      item_bounds (item, &start, &end);
-      if (offset >= gtk_text_iter_get_offset (&start) && offset <= gtk_text_iter_get_offset (&end))
-        { toggle_item (GTK_BUTTON (item->button), item); return TRUE; }
+      clear_items (self);
+      if (self->renderer != NULL)
+        {
+          marker_preview_pause (self->renderer);
+          gtk_widget_unparent (GTK_WIDGET (self->renderer));
+          g_object_run_dispose (G_OBJECT (self->renderer));
+          g_clear_object (&self->renderer);
+        }
     }
-  return FALSE;
 }
 
 static void
@@ -672,6 +649,8 @@ marker_rich_view_finalize (GObject *object)
 static void
 marker_rich_view_class_init (MarkerRichViewClass *klass)
 {
+  g_signal_new ("source-requested", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
+                0, NULL, NULL, NULL, G_TYPE_NONE, 0);
   G_OBJECT_CLASS (klass)->dispose = marker_rich_view_dispose;
   G_OBJECT_CLASS (klass)->finalize = marker_rich_view_finalize;
 }
@@ -695,5 +674,9 @@ marker_rich_view_new (MarkerSourceView *source)
   g_signal_connect_object (source_buffer (self), "changed", G_CALLBACK (buffer_changed), self, 0);
   g_signal_connect_object (source, "cursor-changed", G_CALLBACK (cursor_changed), self, 0);
   g_signal_connect_object (source, "layout-changed", G_CALLBACK (queue_layout), self, G_CONNECT_SWAPPED);
+  g_signal_connect_object (gtk_scrollable_get_hadjustment (GTK_SCROLLABLE (source)),
+                           "value-changed", G_CALLBACK (scroll_changed), self, G_CONNECT_SWAPPED);
+  g_signal_connect_object (gtk_scrollable_get_vadjustment (GTK_SCROLLABLE (source)),
+                           "value-changed", G_CALLBACK (scroll_changed), self, G_CONNECT_SWAPPED);
   return self;
 }

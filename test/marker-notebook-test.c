@@ -31,8 +31,10 @@ test_editor_apply_cancel (void)
   g_autoptr (GFile) root = g_file_new_for_path ("/tmp/widget-notebook");
   g_autoptr (MarkerProject) project = marker_project_new (root);
   GtkWidget *window = adw_window_new ();
+  gtk_window_set_default_size (GTK_WINDOW (window), 600, 600);
   adw_window_set_content (ADW_WINDOW (window), marker_notebook_icon_new (project));
   gtk_window_present (GTK_WINDOW (window));
+  drain_events ();
   marker_notebook_editor_present (project, window);
   AdwDialog *dialog = adw_window_get_visible_dialog (ADW_WINDOW (window));
   GtkWidget *entry = find_widget (GTK_WIDGET (dialog), GTK_TYPE_ENTRY, NULL);

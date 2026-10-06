@@ -33,6 +33,7 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE (MarkerPreview, marker_preview, MARKER, PREVIEW, WebKitWebView)
 
 MarkerPreview       *marker_preview_new                          (void);
+void                 marker_preview_pause                        (MarkerPreview      *preview);
 void                 marker_preview_zoom_out                     (MarkerPreview      *preview);
 void                 marker_preview_zoom_original                (MarkerPreview      *preview);
 void                 marker_preview_zoom_in                      (MarkerPreview      *preview);

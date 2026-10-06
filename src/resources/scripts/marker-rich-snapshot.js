@@ -36,10 +36,10 @@ async function markerRichSnapshot(count, token) {
       rect.error = 'plot';
     else if (nodes.some(node => Array.from(node.querySelectorAll('img')).some(image => !image.naturalWidth)))
       rect.error = 'image';
-    else if (nodes.some(node => node.querySelector('.katex-error')))
+    else if (nodes.some(node => node.querySelector('.katex-error,mjx-merror,.MathJax_Error')))
       rect.error = 'equation';
     else if (nodes.some(node => node.querySelector(
-      'code.language-gnuplot,code.language-mermaid,code.language-math,code.language-tex,code.language-latex')))
+      'code.language-gnuplot,code.language-charter,code.language-mermaid,code.language-math,code.language-tex,code.language-latex')))
       rect.error = 'disabled';
     if (rect.error) rect.width = rect.height = 0;
     rects.push(rect);

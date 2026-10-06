@@ -80,7 +80,13 @@ char* html_header(MarkerMathJSMode    mathjs_mode,
       } else
       {
         mathjs_css = g_strdup(" ");
-        mathjs_script = g_strdup_printf("<script src=\"file:///usr/share/javascript/mathjax/MathJax.js?config=TeX-AMS_HTML\"></script>");
+        if (g_file_test ("/usr/share/javascript/mathjax/MathJax.js", G_FILE_TEST_IS_REGULAR))
+          mathjs_script = g_strdup ("<script src=\"file:///usr/share/javascript/mathjax/MathJax.js?config=TeX-AMS_HTML\"></script>");
+        else
+          mathjs_script = g_strdup_printf (
+            "<script>window.MathJax={tex:{inlineMath:[['$','$'],['\\\\(','\\\\)']]},"
+            "options:{enableMenu:false},startup:{typeset:false}};</script>"
+            "<script src=\"file://%smathjax/tex-svg-full.js\"></script>", SCRIPTS_DIR);
         mathjs_auto = g_strdup(" ");
       }
       break;
@@ -155,7 +161,9 @@ html_footer(MarkerMathJSMode     mathjs_mode,
         ".forEach(code=>{const math=document.createElement('div');math.className='marker-math-block';"
         "math.textContent='$$\\n'+code.textContent+'\\n$$';code.parentElement.replaceWith(math);});%s</script>",
         backend == KATEX ? "renderMathInElement(document.body);" :
-                          "if(window.MathJax?.Hub)MathJax.Hub.Queue(['Typeset',MathJax.Hub]);");
+                          "if(window.MathJax?.Hub){MathJax.Hub.Config({tex2jax:{inlineMath:[['$','$'],['\\\\(','\\\\)']]}});"
+                          "MathJax.Hub.Queue(['Typeset',MathJax.Hub]);}"
+                          "else if(window.MathJax?.startup)window.markerMathReady=MathJax.startup.promise.then(()=>MathJax.typesetPromise());");
       break;
   }
 
@@ -185,7 +193,7 @@ html_footer(MarkerMathJSMode     mathjs_mode,
 
   char* buffer = g_strdup_printf("%s\n%s\n%s\n"
     "<script>window.markerRenderingReady=Promise.all([document.fonts.ready,"
-    "window.markerMermaidReady||Promise.resolve(),new Promise(resolve=>{"
+    "window.markerMermaidReady||Promise.resolve(),window.markerMathReady||Promise.resolve(),new Promise(resolve=>{"
     "if(window.MathJax?.Hub)MathJax.Hub.Queue(resolve);else resolve();})]);</script>\n",
     mathjs_render, highlight_render, mermaid_render);
   g_free(highlight_render);

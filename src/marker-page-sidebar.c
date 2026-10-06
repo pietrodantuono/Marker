@@ -613,6 +613,8 @@ marker_page_sidebar_init (MarkerPageSidebar *self)
   gtk_menu_button_set_menu_model (self->title_menu, G_MENU_MODEL (menu));
   GtkWidget *new_page = gtk_button_new_from_icon_name ("list-add-symbolic");
   GtkWidget *search = gtk_toggle_button_new ();
+  gtk_widget_add_css_class (new_page, "flat");
+  gtk_widget_add_css_class (search, "flat");
   gtk_button_set_icon_name (GTK_BUTTON (search), "edit-find-symbolic");
   gtk_widget_set_tooltip_text (new_page, _("New Page"));
   gtk_widget_set_tooltip_text (search, _("Search Pages or Files"));

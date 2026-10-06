@@ -1,12 +1,19 @@
 /* Marker application shell.  Colors follow libadwaita named colors so every
  * surface changes with the system appearance and high-contrast preference. */
 
-.marker-split {
-  --sidebar-border-color: @borders;
-  --secondary-sidebar-border-color: @borders;
+/* One inset divider, including GTK 4.14 which has no CSS custom properties.
+ * Inset shadows leave overlay sizing and native navigation shadows intact. */
+.marker-split > .sidebar-pane:dir(ltr),
+.marker-split > .sidebar-pane.end:dir(rtl) {
+  box-shadow: inset -1px 0 @borders;
 }
 
-/* Let the native pane draw one divider; opaque children cover its inset edge. */
+.marker-split > .sidebar-pane:dir(rtl),
+.marker-split > .sidebar-pane.end:dir(ltr) {
+  box-shadow: inset 1px 0 @borders;
+}
+
+/* Transparent sidebar children leave the divider visible along the full edge. */
 .marker-split > .sidebar-pane,
 .marker-split > .sidebar-pane:backdrop {
   background: @window_bg_color;

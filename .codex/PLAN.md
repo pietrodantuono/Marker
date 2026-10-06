@@ -1,5 +1,128 @@
 # Implementation plan
 
+## Page-wide Source/Render and scientific coverage
+
+1. Complete discovery/snapshot support for Charter; use the existing math/Mermaid/
+   gnuplot renderer and readiness. Supply a bundled local MathJax SVG fallback
+   because this host lacks the existing system MathJax path. Retain system MathJax
+   2 when available, existing KaTeX and disabled-renderer preferences.
+2. Replace per-region controls/cursor toggle API with one editor-owned Source/Render
+   action at the right of the formatting toolbar. Default Render; Source shows raw
+   Markdown in the same buffer. Remember choice per live editor, without settings
+   migration. Rendered-element clicks request page Source through a controller signal.
+3. Disable/dispose inline renderer on Source; pause the hidden full preview and
+   skip scientific conversion on edits, resize, preferences, CSS/data refresh. Render
+   only the inline renderer in Formatted mode. Explicit Print prepares its full
+   preview on demand and pauses again afterwards; exports retain their own pipeline.
+4. Replace obsolete per-region tests with real-pointer page-toggle coverage;
+   verify all engines, source fidelity/undo, stopped rendering through edits/refresh,
+   resume, disabled engines, errors, CSS/data updates, view modes and export. Build/
+   test native and modern stacks, document behavior and reconcile final handoff.
+   Screenshot review additionally found a stale title/Save after undo: connect
+   GtkTextBuffer's actual modified-changed signal and assert visible clean state.
+
+Review gate: one editor choice, one buffer, existing parser/cascade/backend. Remove
+superseded region-button/pinning APIs instead of parallel controls. Dispose monitors,
+timeouts and WebKit readiness; generation checks reject stale callbacks. Pausing
+must destroy page workers, not only hide snapshots. No notebook/source migration;
+explicit rendering/print/export may evaluate graphics after user requests it.
+
+Exit (2026-10-06): all four implementation units completed. Native 7/7 and modern
+11/11 suites pass; actual science/disabled prefs/pause/unload/undo/title/pointer/
+CSS/data/HTML/PDF checks, screenshots, resources and diff review pass. The later
+user installation/proof follow-up below supersedes the system-reinstall deferral.
+
+## User installation and visible proof (2026-10-06)
+
+- Inspect installed binary/assets, launcher, saved view and sudo availability.
+  Earlier /usr/local already contains the code; the saved Dual Pane view explains
+  the missing Formatted-only toggle. Preserve the user's existing preferences.
+- Configure build-user with ~/.local prefix, build/install all native assets and
+  explicitly target its executable from the user desktop entry. No new app ID,
+  data migration, production code or system modifications are required.
+- Run all seven native suites on a task-owned Xvfb display; desktop-focus-dependent
+  failures must be recorded rather than counted as passes.
+- Capture the actual installed executable with isolated settings/session state
+  and synthetic MathJax/Mermaid/Charter/gnuplot Markdown. Use a separate app launch
+  from the test harness; review both page-wide toggle states and rendered charts.
+- Exit: matching build/install hash, validated launcher, seven passing suites,
+  reviewed direct captures and updated TASKS/PROGRESS/INSTALLATION-PROOF handoff.
+
+## Historical inline Source/Render follow-up (superseded by the page control)
+
+- Reopened after user report: signal-emitted clicks bypass native pointer dispatch.
+  Reproduce press/release on the actual Source button through XTest on an isolated
+  X11 display before further production changes. Inspect ancestor gestures, caret
+  reveals and button layout between press and release. Keep pointer dependencies
+  optional and test-only; preserve the existing semantic/refresh regression.
+- Exit now additionally requires native press/release without dragging/selection,
+  released-button Source persistence and repeated Source/Render on the same region.
+- Implementation: claim existing native button/image gestures on press so ancestor
+  selection cannot change the action before release. Retain GTK cancellation and
+  keyboard handling. The expanded native window suite takes 58.78s, so increase its
+  former 60s timeout to 90s to avoid turning pointer coverage into a timing failure.
+
+- Objective: a normal Source click stays open during the formatted editing session,
+  independent of caret selection, refresh, text edits, resizing and render callbacks.
+- Modules: MarkerRichView presentation state and existing GTK rich-editing regression.
+- Changes: distinguish explicit source choice from temporary automatic editing;
+  transfer explicit choices using existing buffer marks when rebuilding regions.
+  Render clears the choice for its region. Keep automatic stale-source/error reveal.
+- Dependencies/migration: existing rich discovery/marks; no new persisted setting,
+  source bytes, buffer, parser or render backend. Leaving formatted mode resets
+  ephemeral region presentation as before.
+- Risks: stale item/widget pointers during rebuild; marks shift during edits/undo;
+  automatic buffer reveal must not pin every unrelated region open.
+- Validation: first reproduce plain-click/focus-out/refresh failure; then test
+  multiple source choices, resize, edits/undo, explicit Render, source fidelity and
+  existing rich failure/refresh cases on native and modern stacks.
+- Exit: regression and relevant suites pass; update tracking and reinstall handoff.
+
+## Phase 7: Zorin 18 native compatibility follow-up
+
+- Styling correction: replace the broad Zorin variant stylesheet with the installed
+  Libadwaita base/color resources when its vendor loader is active. Restore one
+  GTK 4.14-compatible inset divider at each sidebar edge; preserve overlay shadows
+  and make simple shell icon actions explicitly flat. Validate native and modern
+  light/dark wide/medium/narrow captures against the incumbent Folio surfaces.
+- Objective: keep the existing redesign/scientific workflows while permitting
+  native Meson installation on the user's Zorin 18.1/noble system.
+- Modules: Meson dependency bounds, Debian metadata, rich-view scroll allocation,
+  window minimums, preference theme integration, tests and README.
+- Changes: audit actual shipped headers/API versions, reduce minimums only where
+  compiled and exercised, prefer shared native APIs over versioned wrapper layers.
+  Keep current WebKit minimum; noble updates already supply 2.52.6.
+- Dependencies: user-approved compatibility work; native development packages are
+  now installed, and system reinstall needs interactive sudo. The fallback remains available
+  for environments without a system libspelling dependency.
+- Risks: newer text-tag properties/GTK CSS and older spelling behavior may differ
+  even when symbols compile; native GUI tests must detect warnings and regressions.
+- Migration: no application identity, profile, notebook or Markdown format changes;
+  preserve existing Flatpak packaging and modern-library builds.
+- Validation: native configure/optimized build/tests on actual noble libraries,
+  GTK warning review, rendered regions/source/undo, all view modes, responsive
+  notebook UI, preferences/fonts/spelling, HTML/PDF and metadata/diff checks.
+- Exit: native install/launch succeeds with maintained feature behavior. Record
+  sudo/environment blockers and actual test limits; never equate compile with done.
+- Second-pass review: retain widgets/models/cascade; avoid duplicate compatibility
+  state, no profile migration or parser fork. Library floor changes need header and
+  runtime evidence, and any essential newer API must get a narrow equivalent first.
+- Runtime discoveries: GTK 4.14 needs explicit overlay allocation during scroll;
+  connect object-bound adjustment signals after SourceView is parented. Adw 1.5
+  needs an explicit breakpoint-window minimum. Zorin's vendor theme loader ignores
+  application GtkSettings; an optional theme-path property identifies its loaded
+  theme. The process-local provider now imports the installed Libadwaita base/color
+  resources after the full matching-Zorin-variant import caused styling regressions.
+  Do not write system theme settings or fork the UI. Regression cases cover actual
+  spelling annotations, theme colors and existing rendered-region scrolling.
+- Modern full-run discovery: pending buffer refreshes and document navigation can
+  destroy a scientific/font readiness context. Explicit refresh consumes its
+  debounce; cancel readiness calls on replacement, navigation start and disposal.
+  Keep generation checks, actual failure reporting and the existing 30s deadline.
+- Validation route: absent host development packages can be extracted into a
+  temporary pkg-config prefix to compile against installed native runtime libraries.
+  This establishes compatibility, but does not satisfy the installation exit.
+
 ## Working rules and gate
 
 Use these five .codex documents as the sole feature workspace (user-selected).

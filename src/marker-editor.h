@@ -50,6 +50,8 @@ typedef enum {
 } MarkerMathBackEnd;
 
 MarkerEditor        *marker_editor_new                           (void);
+void                 marker_editor_print                         (MarkerEditor       *editor,
+                                                                  GtkWindow          *parent);
 MarkerEditor        *marker_editor_new_from_file                 (GFile              *file);
 MarkerViewMode       marker_editor_get_view_mode                 (MarkerEditor       *editor);
 void                 marker_editor_set_view_mode                 (MarkerEditor       *editor,
